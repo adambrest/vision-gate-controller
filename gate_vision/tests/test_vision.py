@@ -124,15 +124,19 @@ def labelled(kind: str) -> list[str]:
 
 
 def test_reference_set_covers_day_ir_and_night() -> None:
-    assert labelled("open") == ["Day-open", "IR-open", "Night-open"]
-    assert labelled("closed") == ["Day-closed", "IR-closed", "Night-closed"]
-    assert len(labelled("partial")) == 8
+    for kind in ("open", "closed"):
+        names = labelled(kind)
+        for lighting in ("Day", "IR", "Night"):
+            assert any(n.startswith(lighting) for n in names), f"{kind} lacks {lighting}"
+    assert len(labelled("open")) == 4
+    assert len(labelled("closed")) == 5
+    assert len(labelled("partial")) == 9
 
 
 def test_partial_references_are_not_loaded_as_endpoints() -> None:
     """references/partial holds held-out test data, never classifier input."""
     classifier = real_classifier()
-    assert classifier.count == 6
+    assert classifier.count == 9
     assert all("partial" not in name for name in classifier.reference_files)
 
 
@@ -162,8 +166,8 @@ def test_no_endpoint_reference_is_mistaken_for_a_partial_gate() -> None:
 def test_travel_catches_most_but_not_all_held_out_partials() -> None:
     """Documents real coverage on the eight labelled partial frames.
 
-    Four of eight are detected. The four missed measure fully open, so they
-    behave exactly as they did before travel existed - no new failure mode.
+    Five of nine are detected. The rest measure fully open, so they behave
+    exactly as they did before travel existed - no new failure mode.
     """
     classifier = real_classifier()
     caught = [
@@ -171,7 +175,7 @@ def test_travel_catches_most_but_not_all_held_out_partials() -> None:
         for name in labelled("partial")
         if 0.08 < classifier.travel.measure(real_region("partial", name)) < 0.92
     ]
-    assert len(caught) == 4
+    assert len(caught) == 5
 
 
 def test_endpoint_travel_veto_is_disabled_by_default() -> None:
@@ -199,14 +203,23 @@ def test_travel_generalisation_gap_is_tracked() -> None:
     opens = sorted((REFERENCES / "open").glob("*.jpg"))
     closeds = sorted((REFERENCES / "closed").glob("*.jpg"))
     read = lambda p: extract_gate_region(read_frame(p))
-    failures = 0
+    open_failures = 0
+    for held in opens:
+        rest = [p for p in opens if p != held]
+        travel = GateTravel()
+        travel.calibrate([read(p) for p in rest], [read(p) for p in closeds])
+        if travel.measure(read(held)) < 0.92:
+            open_failures += 1
+    closed_failures = 0
     for held in closeds:
         rest = [p for p in closeds if p != held]
         travel = GateTravel()
         travel.calibrate([read(p) for p in opens], [read(p) for p in rest])
         if travel.measure(read(held)) > 0.08:
-            failures += 1
-    assert failures == 3, "if this changes, re-evaluate enabling endpoint_travel_veto"
+            closed_failures += 1
+    # Open generalises; closed does not. Adding references shrinks this.
+    assert open_failures == 0
+    assert closed_failures == 3, "re-evaluate enabling endpoint_travel_veto"
 
 
 def test_missing_travel_calibration_leaves_the_verdict_untouched() -> None:

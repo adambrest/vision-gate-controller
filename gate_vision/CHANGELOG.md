@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.11
+
+- Add three endpoint references captured at times the set did not cover: an
+  afternoon closed gate under dappled tree shadow, a late-night closed gate,
+  and an afternoon open gate. A vehicle crossing the open gateway is added to
+  the held-out partial folder.
+- These were found by running real frames through `tools/classify.py`. Both
+  closed frames were previously reported as `PARTIALLY_OPEN`, so the cover
+  state read `unknown` for a fully closed gate in the afternoon and at night.
+  The scene changes more with sun angle than with gate position, and the
+  reference set did not cover those angles.
+- Coverage measured on those six frames improves from 4/6 to 5/6, travel
+  leave-one-out from 3/6 to 6/9, and detected partials from 4/8 to 5/9.
+  Travel leave-one-out now fails only on closed references; open generalises
+  cleanly.
+
 ## 1.1.10
 
 - Add `tools/classify.py`, which runs any image through the production pipeline

@@ -1,5 +1,5 @@
 name: "Vision Gate Controller"
-version: "1.1.10"
+version: "1.1.11"
 slug: "gate_vision"
 description: "Camera-verified main gate controller"
 url: "https://github.com/adambrest/vision-gate-controller/tree/main/gate_vision"
