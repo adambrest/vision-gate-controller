@@ -22,7 +22,7 @@ from app.gate_controller import GateController, OperationInProgressError
 from app.homeassistant import HomeAssistantClient
 from app.models import GatePosition, GateTarget, Observation, OperationResult
 from app.mqtt_cover import MqttCover
-from app.vision import ReferenceClassifier, RollingVision
+from app.vision import ReferenceClassifier, RollingVision, set_gate_polygon
 
 
 LOGGER = logging.getLogger(__name__)
@@ -252,12 +252,14 @@ def web_server_task(runtime: Runtime) -> asyncio.Task[Any]:
 
 async def run() -> None:
     settings = Settings.from_options()
+    set_gate_polygon(settings.polygon_points())
     home_assistant = HomeAssistantClient(settings.camera_entity, settings.gate_script)
     camera = Camera(home_assistant)
     classifier = ReferenceClassifier(
         Path("/app/references"),
         endpoint_travel_tolerance=settings.endpoint_travel_tolerance,
         endpoint_travel_veto=settings.endpoint_travel_veto,
+        endpoint_travel_corroboration=settings.endpoint_travel_corroboration,
     )
     vision = RollingVision(settings.confirmation_window, settings.confirmation_required)
     runtime = Runtime(settings, camera, classifier, vision)

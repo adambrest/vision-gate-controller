@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.13
+
+- Fix a plainly closed gate reporting `unknown`. Region similarity scores a
+  closed gate confidently closed but often with too thin a margin to clear the
+  0.80 confirmation threshold, so the entity never confirmed. `IR-closed`, a
+  reference frame in its own set, scored 0.54.
+- Use measured travel as independent corroboration. Travel near zero requires
+  the whole corridor to read as gate, which only a fully closed gate does, so it
+  can confirm CLOSED. The reverse does not hold: travel near one only means "not
+  like a closed reference", which a partly open gate triggers whenever its slats
+  fall out of phase, so OPEN is never promoted - only strengthened. Disable with
+  `endpoint_travel_corroboration`.
+- All six endpoint references now reach the confirmation threshold, up from
+  five. Partial behaviour is unchanged.
+- Square the gate polygon into a parallelogram. A rigid leaf sweeping a straight
+  opening projects to parallel edges; the derived corner splayed right.
+- Add `gate_polygon` to the options, so the corridor can be retuned from the
+  add-on configuration without a rebuild. Corners are `"x,y"` pairs in
+  1280x720 camera coordinates, ordered top-left, top-right, bottom-right,
+  bottom-left, and the Ingress page draws the result.
+
 ## 1.1.12
 
 - Correct three mislabelled frames added in 1.1.11. All three are partially

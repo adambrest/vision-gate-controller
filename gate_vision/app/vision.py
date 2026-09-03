@@ -24,8 +24,23 @@ GATE_POINTS = {
     "top_left": (326.3, 296.7),
     "bottom_left": (320.8, 407.8),
     "top_right": (616.7, 391.3),
-    "bottom_right": (643.1, 500.2),
+    "bottom_right": (611.2, 502.4),
 }
+
+
+def set_gate_polygon(points: dict[str, tuple[float, float]]) -> None:
+    """Override the corridor at startup, so it can be tuned without a rebuild."""
+    global GATE_POINTS, GATE_POLYGON
+    missing = {"top_left", "top_right", "bottom_right", "bottom_left"} - set(points)
+    if missing:
+        raise ValueError(f"gate polygon is missing {sorted(missing)}")
+    GATE_POINTS = dict(points)
+    GATE_POLYGON = (
+        points["top_left"],
+        points["top_right"],
+        points["bottom_right"],
+        points["bottom_left"],
+    )
 GATE_POLYGON = (
     GATE_POINTS["top_left"],
     GATE_POINTS["top_right"],
@@ -221,11 +236,13 @@ class ReferenceClassifier:
         *,
         endpoint_travel_tolerance: float = 0.08,
         endpoint_travel_veto: bool = False,
+        endpoint_travel_corroboration: bool = True,
     ) -> None:
         self.reference_root = reference_root
         self.expected_count = expected_count
         self.endpoint_travel_tolerance = endpoint_travel_tolerance
         self.endpoint_travel_veto = endpoint_travel_veto
+        self.endpoint_travel_corroboration = endpoint_travel_corroboration
         self.travel = GateTravel()
         self.features: dict[GatePosition, list[np.ndarray]] = {
             GatePosition.OPEN: [],
@@ -342,6 +359,7 @@ class ReferenceClassifier:
             confidence = partial_score
 
         travel = self.travel.measure(region)
+        position, confidence = self._corroborate(position, confidence, travel, closed_score > open_score)
         position, confidence = self._apply_travel(position, confidence, travel)
 
         return Observation(
@@ -355,6 +373,37 @@ class ReferenceClassifier:
             timestamp,
             travel=travel,
         ), region
+
+    def _corroborate(
+        self,
+        position: GatePosition,
+        confidence: float,
+        travel: float | None,
+        leans_closed: bool,
+    ) -> tuple[GatePosition, float]:
+        """Let measured travel confirm a closed gate the margin alone cannot.
+
+        Region similarity scores a closed gate confidently closed but often with
+        too thin a margin to clear the confirmation threshold, so a plainly shut
+        gate reports `unknown`. Travel near zero is independent evidence: it
+        requires the whole corridor to read as gate, which only a fully closed
+        gate does.
+
+        The reverse does not hold. Travel near one only means "does not match a
+        closed reference", which a partly open gate triggers whenever its slats
+        fall out of phase with the reference, so OPEN is never promoted here -
+        an open reading is only ever strengthened, never created.
+        """
+        if not self.endpoint_travel_corroboration or travel is None:
+            return position, confidence
+        tolerance = self.endpoint_travel_tolerance
+        if travel <= tolerance and leans_closed:
+            agreement = 1.0 - travel / max(tolerance, 1e-6)
+            return GatePosition.CLOSED, max(confidence, 0.80 + 0.15 * agreement)
+        if position is GatePosition.OPEN and travel >= 1.0 - tolerance:
+            agreement = 1.0 - (1.0 - travel) / max(tolerance, 1e-6)
+            return position, max(confidence, 0.80 + 0.15 * agreement)
+        return position, confidence
 
     def _apply_travel(
         self,

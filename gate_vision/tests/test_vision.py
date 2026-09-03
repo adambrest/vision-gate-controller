@@ -9,6 +9,7 @@ import pytest
 
 from app.models import GatePosition, Observation
 from app.config import Settings
+from app.vision import GATE_POINTS as V_GATE_POINTS
 from app.vision import (
     GateTravel,
     ReferenceClassifier,
@@ -46,7 +47,7 @@ def six_references(root: Path) -> None:
 def test_polygon_scales_from_reference_resolution() -> None:
     points = scaled_gate_points(640, 360)
     assert points["top_left"] == pytest.approx((163.15, 148.35))
-    assert points["bottom_right"] == pytest.approx((321.55, 250.1))
+    assert points["bottom_right"] == pytest.approx((305.6, 251.2))
 
 
 def test_perspective_transform_returns_image() -> None:
@@ -241,3 +242,64 @@ def test_small_frames_are_not_shrunk_below_the_working_width() -> None:
         ok, encoded = cv2.imencode(".jpg", image)
         assert ok
         assert decode_frame(np.frombuffer(encoded.tobytes(), dtype=np.uint8)).shape[:2] == expected
+
+
+def test_gate_polygon_is_a_parallelogram() -> None:
+    """A rigid leaf sweeping a straight opening projects to parallel edges."""
+    pts = V_GATE_POINTS
+    top = (pts["top_right"][0] - pts["top_left"][0], pts["top_right"][1] - pts["top_left"][1])
+    bottom = (pts["bottom_right"][0] - pts["bottom_left"][0], pts["bottom_right"][1] - pts["bottom_left"][1])
+    assert top == pytest.approx(bottom, abs=0.5)
+
+
+def test_gate_polygon_is_configurable() -> None:
+    """The corridor can be retuned from add-on options without a rebuild."""
+    points = Settings(gate_polygon="1,2 3,4 5,6 7,8").polygon_points()
+    assert points["top_left"] == (1.0, 2.0)
+    assert points["bottom_left"] == (7.0, 8.0)
+    for bad in ("1,2 3,4", "1,2 3,4 5,6 x,y"):
+        with pytest.raises(ValueError):
+            Settings(gate_polygon=bad).polygon_points()
+
+
+def test_travel_corroboration_confirms_a_closed_gate_the_margin_misses() -> None:
+    """IR-closed scored 0.54 on margin alone, below the 0.80 confirmation bar."""
+    classifier = real_classifier()
+    position, confidence = classifier._corroborate(
+        GatePosition.PARTIALLY_OPEN, 0.54, 0.0, leans_closed=True
+    )
+    assert position is GatePosition.CLOSED
+    assert confidence >= 0.80
+
+
+def test_travel_corroboration_never_promotes_to_open() -> None:
+    """Travel near one only means 'unlike closed', which partials also trigger."""
+    classifier = real_classifier()
+    assert classifier._corroborate(
+        GatePosition.PARTIALLY_OPEN, 0.5, 1.0, leans_closed=False
+    ) == (GatePosition.PARTIALLY_OPEN, 0.5)
+    # An existing open reading is strengthened, not created.
+    _, confidence = classifier._corroborate(GatePosition.OPEN, 0.5, 1.0, leans_closed=False)
+    assert confidence >= 0.80
+
+
+def test_travel_corroboration_needs_similarity_to_agree() -> None:
+    classifier = real_classifier()
+    assert classifier._corroborate(
+        GatePosition.PARTIALLY_OPEN, 0.4, 0.0, leans_closed=False
+    ) == (GatePosition.PARTIALLY_OPEN, 0.4)
+
+
+def test_every_endpoint_reference_reaches_the_confirmation_threshold() -> None:
+    """A plainly shut or open gate must not report unknown."""
+    classifier = real_classifier()
+    for kind, expected in (("open", GatePosition.OPEN), ("closed", GatePosition.CLOSED)):
+        for name in labelled(kind):
+            classifier.previous = None
+            observation, _ = classifier.observe(
+                read_frame(REFERENCES / kind / f"{name}.jpg"),
+                sample_interval_seconds=1.0,
+                timestamp=datetime.now(UTC),
+            )
+            assert observation.position is expected, name
+            assert observation.confidence >= 0.80, f"{name} scored {observation.confidence}"

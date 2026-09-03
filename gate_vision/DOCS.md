@@ -74,6 +74,18 @@ rain, headlights - to `references/open` and `references/closed`, publish a new
 version, and re-check. `references/partial` holds labelled partial frames used
 only for testing; the classifier never loads them.
 
+## Adjusting the gate polygon
+
+`gate_polygon` sets the corridor the gate leaf sweeps, as four `"x,y"` corners
+in 1280x720 camera coordinates ordered top-left, top-right, bottom-right,
+bottom-left. The Ingress page draws it on the live frame, so adjust the option,
+restart the app, and check the outline.
+
+Keep it to the gate itself. The original polygon reached into the road, so
+passing vehicles and moving shadows were measured as though they were the gate.
+A rigid leaf sweeping a straight opening projects to a parallelogram, so
+opposite edges should stay parallel.
+
 ## Testing frames offline
 
 `tools/classify.py` runs any image through the production pipeline, so edge
@@ -96,7 +108,19 @@ quickest way to see why a frame was read the way it was.
 Capture reference and test frames at the camera's full resolution where
 possible. Frames smaller than the live feed calibrate on less detail.
 
-## Safety behavior## Testing frames offline
+## Safety behavior## Adjusting the gate polygon
+
+`gate_polygon` sets the corridor the gate leaf sweeps, as four `"x,y"` corners
+in 1280x720 camera coordinates ordered top-left, top-right, bottom-right,
+bottom-left. The Ingress page draws it on the live frame, so adjust the option,
+restart the app, and check the outline.
+
+Keep it to the gate itself. The original polygon reached into the road, so
+passing vehicles and moving shadows were measured as though they were the gate.
+A rigid leaf sweeping a straight opening projects to a parallelogram, so
+opposite edges should stay parallel.
+
+## Testing frames offline
 
 `tools/classify.py` runs any image through the production pipeline, so edge
 cases can be checked before trusting them. Run it from the `gate_vision`

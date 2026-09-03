@@ -21,6 +21,10 @@ class Settings:
     camera_unavailable_after_seconds: float = 15.0
     endpoint_travel_tolerance: float = 0.08
     endpoint_travel_veto: bool = False
+    endpoint_travel_corroboration: bool = True
+    # Corridor corners as "x,y" pairs in 1280x720 camera coordinates: the gate
+    # travel corridor, ordered top-left, top-right, bottom-right, bottom-left.
+    gate_polygon: str = "326.3,296.7 616.7,391.3 611.2,502.4 320.8,407.8"
 
     @classmethod
     def from_options(cls, path: Path = Path("/data/options.json")) -> "Settings":
@@ -32,7 +36,22 @@ class Settings:
         settings.validate()
         return settings
 
+    def polygon_points(self) -> dict[str, tuple[float, float]]:
+        names = ("top_left", "top_right", "bottom_right", "bottom_left")
+        parts = self.gate_polygon.split()
+        if len(parts) != 4:
+            raise ValueError("gate_polygon needs four \"x,y\" corners")
+        points: dict[str, tuple[float, float]] = {}
+        for name, part in zip(names, parts):
+            try:
+                x, y = (float(value) for value in part.split(","))
+            except ValueError as exc:
+                raise ValueError(f"gate_polygon corner {name} is not \"x,y\": {part}") from exc
+            points[name] = (x, y)
+        return points
+
     def validate(self) -> None:
+        self.polygon_points()
         if self.confirmation_required > self.confirmation_window:
             raise ValueError("confirmation_required cannot exceed confirmation_window")
         if self.max_gate_attempts != 3:
