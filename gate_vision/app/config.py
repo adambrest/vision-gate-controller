@@ -20,6 +20,7 @@ class Settings:
     max_gate_attempts: int = 3
     camera_unavailable_after_seconds: float = 15.0
     endpoint_travel_tolerance: float = 0.08
+    endpoint_travel_veto: bool = False
 
     @classmethod
     def from_options(cls, path: Path = Path("/data/options.json")) -> "Settings":

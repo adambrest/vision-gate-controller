@@ -8,8 +8,10 @@ import numpy as np
 import pytest
 
 from app.models import GatePosition, Observation
+from app.config import Settings
 from app.vision import (
     DECODE_FLAG,
+    GateTravel,
     ReferenceClassifier,
     RollingVision,
     extract_gate_region,
@@ -105,69 +107,107 @@ async def test_moving_position_does_not_confirm_endpoint() -> None:
     assert snapshot.confirmed == GatePosition.UNKNOWN
 
 
-def real_classifier() -> ReferenceClassifier:
-    return ReferenceClassifier(Path(__file__).resolve().parents[1] / "references")
+REFERENCES = Path(__file__).resolve().parents[1] / "references"
 
 
-def real_region(kind: str, index: int = 0):
-    root = Path(__file__).resolve().parents[1] / "references" / kind
-    path = sorted(root.glob("*.jpg"))[index]
-    return extract_gate_region(cv2.imread(str(path), DECODE_FLAG))
+def real_classifier(**kwargs) -> ReferenceClassifier:
+    return ReferenceClassifier(REFERENCES, **kwargs)
+
+
+def real_region(kind: str, name: str):
+    return extract_gate_region(cv2.imread(str(REFERENCES / kind / f"{name}.jpg"), DECODE_FLAG))
+
+
+def labelled(kind: str) -> list[str]:
+    return sorted(p.stem for p in (REFERENCES / kind).glob("*.jpg"))
+
+
+def test_reference_set_covers_day_ir_and_night() -> None:
+    assert labelled("open") == ["Day-open", "IR-open", "Night-open"]
+    assert labelled("closed") == ["Day-closed", "IR-closed", "Night-closed"]
+    assert len(labelled("partial")) == 8
+
+
+def test_partial_references_are_not_loaded_as_endpoints() -> None:
+    """references/partial holds held-out test data, never classifier input."""
+    classifier = real_classifier()
+    assert classifier.count == 6
+    assert all("partial" not in name for name in classifier.reference_files)
 
 
 def test_travel_calibrates_from_the_reference_set() -> None:
     assert real_classifier().travel.ready is True
 
 
-@pytest.mark.parametrize(
-    ("kind", "index", "expected"),
-    [("closed", 0, 0.0), ("closed", 1, 0.0), ("open", 0, 1.0), ("open", 1, 1.0)],
-)
-def test_travel_measures_the_real_endpoints(kind: str, index: int, expected: float) -> None:
-    """Both endpoints must stay exact, including the night closed reference."""
-    travel = real_classifier().travel.measure(real_region(kind, index))
-    assert travel == pytest.approx(expected, abs=0.02)
+@pytest.mark.parametrize("name", ["Day-closed", "IR-closed", "Night-closed"])
+def test_travel_is_zero_at_the_closed_endpoint(name: str) -> None:
+    assert real_classifier().travel.measure(real_region("closed", name)) == pytest.approx(0.0, abs=0.08)
 
 
-def test_endpoints_are_still_classified_after_the_travel_check() -> None:
+@pytest.mark.parametrize("name", ["Day-open", "IR-open", "Night-open"])
+def test_travel_is_one_at_the_open_endpoint(name: str) -> None:
+    assert real_classifier().travel.measure(real_region("open", name)) == pytest.approx(1.0, abs=0.08)
+
+
+def test_no_endpoint_reference_is_mistaken_for_a_partial_gate() -> None:
+    """The safety-critical property: a false partial lets a command pulse the gate."""
     classifier = real_classifier()
-    for kind, expected in (("closed", GatePosition.CLOSED), ("open", GatePosition.OPEN)):
-        for index in (0, 1):
-            root = Path(__file__).resolve().parents[1] / "references" / kind
-            frame = cv2.imread(str(sorted(root.glob("*.jpg"))[index]), DECODE_FLAG)
-            classifier.previous = None
-            observation, _ = classifier.observe(
-                frame, sample_interval_seconds=1.0, timestamp=datetime.now(UTC)
-            )
-            assert observation.position is expected
-            assert observation.confidence >= 0.80
+    for kind in ("open", "closed"):
+        for name in labelled(kind):
+            travel = classifier.travel.measure(real_region(kind, name))
+            assert travel <= 0.08 or travel >= 0.92, f"{name} measured {travel}"
 
 
-def test_gate_short_of_its_endpoint_is_not_reported_as_open() -> None:
-    """The regression: region similarity called a nearly-open gate OPEN."""
+def test_travel_catches_most_but_not_all_held_out_partials() -> None:
+    """Documents real coverage on the eight labelled partial frames.
+
+    Five of eight are detected. The three missed measure fully open, so they
+    behave exactly as they did before travel existed - no new failure mode.
+    """
     classifier = real_classifier()
-    closed, opened = real_region("closed"), real_region("open")
-    width = closed.shape[1]
-    # Slide the panel left, leaving it short of the fully open position.
-    partial = opened.copy()
-    shift = int(round(0.55 * width))
-    partial[:, : width - shift] = closed[:, shift:]
+    caught = [
+        name
+        for name in labelled("partial")
+        if 0.08 < classifier.travel.measure(real_region("partial", name)) < 0.92
+    ]
+    assert len(caught) == 5
 
-    travel = classifier.travel.measure(partial)
-    assert travel is not None and travel < 0.92
-    position, confidence = classifier._apply_travel(GatePosition.OPEN, 0.98, travel)
+
+def test_endpoint_travel_veto_is_disabled_by_default() -> None:
+    """Leave-one-out shows travel does not generalise to unseen lighting.
+
+    A held-out daytime CLOSED frame measures fully open, so an enabled veto
+    would downgrade a closed gate and let CLOSE pulse it back open.
+    """
+    assert Settings().endpoint_travel_veto is False
+    classifier = real_classifier()
+    assert classifier._apply_travel(GatePosition.OPEN, 0.95, 0.0) == (GatePosition.OPEN, 0.95)
+
+
+def test_travel_veto_downgrades_only_when_explicitly_enabled() -> None:
+    classifier = real_classifier(endpoint_travel_veto=True)
+    position, confidence = classifier._apply_travel(GatePosition.OPEN, 0.98, 0.50)
     assert position is GatePosition.PARTIALLY_OPEN
-    # Stays commandable so the controller can drive the gate to its target.
     assert confidence >= 0.70
+    # Still never invents an endpoint.
+    assert classifier._apply_travel(GatePosition.UNKNOWN, 0.3, 1.0) == (GatePosition.UNKNOWN, 0.3)
 
 
-def test_travel_never_invents_an_endpoint() -> None:
-    classifier = real_classifier()
-    for claimed in (GatePosition.PARTIALLY_OPEN, GatePosition.UNKNOWN):
-        position, confidence = classifier._apply_travel(claimed, 0.5, 1.0)
-        assert position is claimed and confidence == 0.5
+def test_travel_generalisation_gap_is_tracked() -> None:
+    """Held-out closed frames fail; this is why the veto ships disabled."""
+    opens = sorted((REFERENCES / "open").glob("*.jpg"))
+    closeds = sorted((REFERENCES / "closed").glob("*.jpg"))
+    read = lambda p: extract_gate_region(cv2.imread(str(p), DECODE_FLAG))
+    failures = 0
+    for held in closeds:
+        rest = [p for p in closeds if p != held]
+        travel = GateTravel()
+        travel.calibrate([read(p) for p in opens], [read(p) for p in rest])
+        if travel.measure(read(held)) > 0.08:
+            failures += 1
+    assert failures == 3, "if this changes, re-evaluate enabling endpoint_travel_veto"
 
 
 def test_missing_travel_calibration_leaves_the_verdict_untouched() -> None:
-    classifier = real_classifier()
+    classifier = real_classifier(endpoint_travel_veto=True)
     assert classifier._apply_travel(GatePosition.OPEN, 0.91, None) == (GatePosition.OPEN, 0.91)

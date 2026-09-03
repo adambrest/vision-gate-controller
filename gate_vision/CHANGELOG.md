@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.1.9
+
+- Replace the reference set with six labelled frames covering day, IR and night
+  at both endpoints, plus eight labelled partial frames held out for testing.
+- Fix two bugs in the 1.1.8 travel measure that only appeared once references
+  spanned several lighting conditions. Open references were averaged while
+  closed references were maximised over; averaging a day frame with an IR frame
+  produces a profile matching neither, and a genuinely open gate at night
+  measured 0% travel. The leading edge also took the rightmost matching run
+  anywhere in the region, so a fence post at the far side pinned it to fully
+  closed. References are now maximised over individually and the edge is the end
+  of the leaf's contiguous run.
+- Disable the endpoint travel veto by default. Leave-one-out over the reference
+  set shows travel does not generalise to unseen lighting: a held-out daytime
+  CLOSED frame measures fully open, because the comparison is a lighting-matched
+  nearest neighbour rather than a geometric one. Left enabled it would downgrade
+  a genuinely closed gate to PARTIALLY_OPEN and let a CLOSE command pulse an
+  already-closed gate back open. Enable with `endpoint_travel_veto` once the
+  reference set covers more conditions.
+- Travel is still measured every frame and published as the `travel` attribute
+  so coverage can be assessed from real data.
+
 ## 1.1.8
 
 - Fix a state error where a gate stopped short of its endpoint was reported as

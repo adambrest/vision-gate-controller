@@ -257,6 +257,7 @@ async def run() -> None:
     classifier = ReferenceClassifier(
         Path("/app/references"),
         endpoint_travel_tolerance=settings.endpoint_travel_tolerance,
+        endpoint_travel_veto=settings.endpoint_travel_veto,
     )
     vision = RollingVision(settings.confirmation_window, settings.confirmation_required)
     runtime = Runtime(settings, camera, classifier, vision)

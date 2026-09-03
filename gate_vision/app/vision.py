@@ -34,6 +34,8 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 DECODE_FLAG = cv2.IMREAD_REDUCED_COLOR_2
 TRAVEL_COLUMNS = 256
 TRAVEL_ROWS = 128
+# Background columns that end the gate leaf's contiguous run.
+TRAVEL_EDGE_GAP = 6
 
 
 def scaled_gate_points(width: int, height: int) -> dict[str, tuple[float, float]]:
@@ -109,13 +111,13 @@ class GateTravel:
     """
 
     def __init__(self) -> None:
-        self._open: np.ndarray | None = None
+        self._open: list[np.ndarray] = []
         self._closed: list[np.ndarray] = []
         self._parked_end = 0
 
     @property
     def ready(self) -> bool:
-        return self._open is not None and bool(self._closed)
+        return bool(self._open) and bool(self._closed)
 
     @staticmethod
     def _prepare(region: np.ndarray) -> np.ndarray:
@@ -134,39 +136,54 @@ class GateTravel:
         centred = image - image.mean(axis=0, keepdims=True)
         return centred / (np.linalg.norm(centred, axis=0, keepdims=True) + 1e-6)
 
-    @classmethod
-    def _smooth(cls, values: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _smooth(values: np.ndarray) -> np.ndarray:
         return cv2.blur(values.reshape(1, -1), (9, 1)).ravel()
+
+    @staticmethod
+    def _best_match(current: np.ndarray, references: list[np.ndarray]) -> np.ndarray:
+        """Per-column agreement with whichever reference matches best.
+
+        References are kept separate and maximised over, never averaged. Day, IR
+        and night frames of the same scene look nothing alike, so averaging them
+        produces a profile that matches neither.
+        """
+        return np.max([(current * reference).sum(axis=0) for reference in references], axis=0)
 
     def calibrate(self, open_regions: list[np.ndarray], closed_regions: list[np.ndarray]) -> None:
         if not open_regions or not closed_regions:
-            self._open, self._closed, self._parked_end = None, [], 0
+            self._open, self._closed, self._parked_end = [], [], 0
             return
-        self._open = self._column_normalise(
-            np.mean([self._prepare(region) for region in open_regions], axis=0)
-        )
-        self._closed = [
-            self._column_normalise(self._prepare(region)) for region in closed_regions
-        ]
-        # Columns where both endpoints show gate cannot discriminate; the panel
-        # is parked there whether the gate is open or closed.
+        self._open = [self._column_normalise(self._prepare(r)) for r in open_regions]
+        self._closed = [self._column_normalise(self._prepare(r)) for r in closed_regions]
+        # Columns where an open and a closed reference still look alike hold the
+        # parked leaf in both, so they cannot say how far the gate has travelled.
         agreement = self._smooth(
-            np.max([(self._open * closed).sum(axis=0) for closed in self._closed], axis=0)
+            np.max(
+                [[(o * c).sum(axis=0) for c in self._closed] for o in self._open],
+                axis=(0, 1),
+            )
         )
         below = np.flatnonzero(agreement < 0.5)
         self._parked_end = int(below[0]) if below.size else 0
 
     def measure(self, region: np.ndarray) -> float | None:
-        if self._open is None or not self._closed:
+        if not self.ready:
             return None
         current = self._column_normalise(self._prepare(region))
-        to_open = (current * self._open).sum(axis=0)
-        to_closed = np.max([(current * closed).sum(axis=0) for closed in self._closed], axis=0)
-        panel = self._smooth(to_closed - to_open) > 0.0
-        edge = self._parked_end
+        panel = self._smooth(
+            self._best_match(current, self._closed) - self._best_match(current, self._open)
+        ) > 0.0
+        # The leaf is one contiguous body, so travel ends where its run ends. A
+        # later run is a fence post or a parked vehicle, not the gate.
+        edge, gap = self._parked_end, 0
         for column in range(self._parked_end, TRAVEL_COLUMNS):
-            if panel[max(self._parked_end, column - 4) : column + 1].all():
-                edge = column + 1
+            if panel[column]:
+                edge, gap = column + 1, 0
+                continue
+            gap += 1
+            if gap >= TRAVEL_EDGE_GAP:
+                break
         span = TRAVEL_COLUMNS - self._parked_end
         if span <= 0:
             return None
@@ -184,10 +201,12 @@ class ReferenceClassifier:
         expected_count: int | None = None,
         *,
         endpoint_travel_tolerance: float = 0.08,
+        endpoint_travel_veto: bool = False,
     ) -> None:
         self.reference_root = reference_root
         self.expected_count = expected_count
         self.endpoint_travel_tolerance = endpoint_travel_tolerance
+        self.endpoint_travel_veto = endpoint_travel_veto
         self.travel = GateTravel()
         self.features: dict[GatePosition, list[np.ndarray]] = {
             GatePosition.OPEN: [],
@@ -325,11 +344,16 @@ class ReferenceClassifier:
     ) -> tuple[GatePosition, float]:
         """Refuse an endpoint the measured gate travel does not support.
 
-        Region similarity saturates well before the gate finishes travelling, so
-        a gate that has stopped just short of its endpoint scores as a confident
-        OPEN or CLOSED. Travel is measured from the panel's leading edge and can
-        only downgrade a claimed endpoint to PARTIALLY_OPEN; it never invents one.
+        Off by default. Leave-one-out over the reference set shows travel does
+        not generalise to lighting the references do not cover: a held-out
+        daytime CLOSED frame measures fully open, because the comparison is
+        really a lighting-matched nearest neighbour rather than geometry. With
+        the veto on, that would downgrade a genuinely closed gate to
+        PARTIALLY_OPEN and let a CLOSE command pulse an already-closed gate open.
+        Travel is still measured and published so coverage can be assessed.
         """
+        if not self.endpoint_travel_veto:
+            return position, confidence
         if travel is None or position not in (GatePosition.OPEN, GatePosition.CLOSED):
             return position, confidence
         tolerance = self.endpoint_travel_tolerance

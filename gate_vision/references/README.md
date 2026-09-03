@@ -1,14 +1,16 @@
-# Approved reference inventory
+# Reference frames
 
-Only original, approved full-camera frames belong in `open/` and `closed/`.
+`open/` and `closed/` are loaded by the classifier. Every supported image file
+in them is used; there is no filename allowlist. At least one OPEN and one
+CLOSED file are required.
 
-Currently available from the development project:
+`partial/` is **not** loaded by the classifier. It holds labelled
+partially-open frames used as held-out test data for the gate travel measure.
 
-- `open/open_day_20260902_1838.jpg`
-- `open/open_live_20260902_183049.jpg`
-- `closed/closed_day_20260902_1817.jpg`
-- `closed/closed_night_20260901_235838.jpg`
+Filenames record the lighting condition and the gate state, for example
+`Night-partial2.jpg`. Keep that convention: the tests and the travel
+calibration both rely on day, IR and night being represented at each endpoint.
 
-These are the original files included in the published app image.
-
-Add every additional approved original to the correct labeled directory. The classifier loads all supported image files automatically and requires at least one usable file in each endpoint class. Do not satisfy the inventory with copies, generated substitutes, or unrelated snapshots.
+Known gap: leave-one-out testing fails on all three closed references, so
+lighting outside these conditions is not yet covered. See the Gate travel
+section of the app README.

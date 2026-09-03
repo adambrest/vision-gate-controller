@@ -57,20 +57,24 @@ withdrawn.
 
 The Ingress panel is always available. It displays the current frame, fixed polygon, perspective-corrected gate region, classifier values, rolling observations, reference filenames, controller state, attempts, results, and the same GateController command path used by `cover.main_gate`. The Home Assistant cover state is shown separately from the richer internal vision and controller states.
 
-## Gate travel and endpoint strictness
+## Gate travel
 
 The app measures how far the gate has travelled, from 0.0 (closed) to 1.0
-(fully open), and refuses to report OPEN or CLOSED unless the gate is within
-`endpoint_travel_tolerance` (default 0.08) of that endpoint. A gate stopped
-short reports `PARTIALLY_OPEN`, which surfaces as cover state `unknown` with
-`fault_reason: gate_stopped_mid_travel`, and remains commandable so it can be
-driven to its target.
+(fully open), and publishes it as the `travel` attribute and on the Ingress
+debug page.
 
-Raise `endpoint_travel_tolerance` if a fully open gate is reported as partial;
-lower it to be stricter. Measured travel is shown on the Ingress debug page and
-published as the `travel` attribute.
+Travel does not yet gate the reported state. `endpoint_travel_veto` is `false`
+by default because leave-one-out testing shows the measure does not generalise
+to lighting the reference set does not cover: a held-out daytime closed frame
+measures fully open. Enabling it in that state would report a closed gate as
+partial, and a CLOSE command would then pulse the gate back open.
 
-## Safety behavior
+To improve it, add reference frames for conditions not yet covered - dusk,
+rain, headlights - to `references/open` and `references/closed`, publish a new
+version, and re-check. `references/partial` holds labelled partial frames used
+only for testing; the classifier never loads them.
+
+## Safety behavior## Safety behavior
 
 - Startup never pulses the relay.
 - Restart discards any prior in-progress command and re-establishes state from camera frames.

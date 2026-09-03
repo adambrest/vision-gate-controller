@@ -88,23 +88,48 @@ An operation has at most three pulses total: the initial pulse and no more than 
 
 ## Gate travel
 
-Region similarity alone cannot separate a nearly-open gate from a fully open
-one. The frames differ only by a small horizontal shift of the panel's leading
-edge inside a region that is otherwise identical driveway, so a global feature
-is dominated by the parts that do not change. Measured on this camera, a gate at
-82% travel scored OPEN at 0.94 confidence.
+Region similarity cannot separate a nearly-open gate from a fully open one.
+Measured on this camera, a gate at 82% travel scored OPEN at 0.94 confidence,
+and the gap between 90% and 100% travel was about 0.01 - far inside day/night
+variation, so no threshold on that score can separate them.
 
-`GateTravel` measures the leading edge directly, column by column, against the
-reference set, and reports travel from 0.0 (closed) to 1.0 (fully open).
-Columns are normalised individually so brightness cannot move the edge; both
-endpoints of the current reference set, including the night frame, measure
-exactly 0% and 100%.
+`GateTravel` measures the gate leaf's leading edge column by column against the
+reference set and reports travel from 0.0 (closed) to 1.0 (fully open).
+References are compared individually and maximised over, never averaged: day,
+IR and night frames of the same scene look nothing alike. The edge is the end
+of the leaf's contiguous run, so a fence post or a parked vehicle further along
+the region cannot pin it.
 
-Travel then vetoes any endpoint it does not support: a claimed OPEN or CLOSED
-more than `endpoint_travel_tolerance` (default 0.08) away from its endpoint is
-downgraded to `PARTIALLY_OPEN`. The veto can only downgrade an endpoint, never
-invent one. Downgraded confidence stays at or above 0.70, so the gate remains
-commandable and the bounded recovery below can drive it to its target.
+### Measured accuracy
+
+Against the labelled reference set, with the eight partial frames held out of
+calibration:
+
+| | result |
+| --- | --- |
+| Endpoints, in-set | 6/6 exact (open 100%, closed 0%) |
+| Held-out partial frames detected | 5/8 |
+| Endpoint frames misread as partial | 0 |
+| Endpoints, leave-one-out | 3/6 |
+
+The three missed partials measure fully open, so they behave exactly as they did
+before travel existed and add no new failure mode. The last row is the important
+one: with a frame held out of its own calibration, all three closed references
+fail, and a daytime closed gate measures fully open. Travel is therefore doing
+lighting-matched nearest-neighbour matching rather than geometry, and it only
+recognises an endpoint whose lighting the references already cover.
+
+### Why the veto ships disabled
+
+`endpoint_travel_veto` is `false` by default for that reason. Enabled, a
+genuinely closed gate under lighting the references do not cover would be
+downgraded to `PARTIALLY_OPEN`, and because a partial gate stays commandable, a
+CLOSE command would then pulse an already-closed gate back open.
+
+Travel is still measured on every frame and published as the `travel` attribute
+and on the debug page, so coverage can be judged from real data. Enable the veto
+once the reference set covers more conditions - dusk, rain, headlights - and the
+leave-one-out figure above improves.
 
 ## Runtime cost
 

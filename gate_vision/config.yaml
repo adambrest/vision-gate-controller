@@ -1,5 +1,5 @@
 name: "Vision Gate Controller"
-version: "1.1.8"
+version: "1.1.9"
 slug: "gate_vision"
 description: "Camera-verified main gate controller"
 url: "https://github.com/adambrest/vision-gate-controller/tree/main/gate_vision"
@@ -27,6 +27,7 @@ options:
   max_gate_attempts: 3
   camera_unavailable_after_seconds: 15
   endpoint_travel_tolerance: 0.08
+  endpoint_travel_veto: false
 schema:
   camera_entity: str
   gate_script: str
@@ -39,3 +40,4 @@ schema:
   max_gate_attempts: int
   camera_unavailable_after_seconds: float
   endpoint_travel_tolerance: float
+  endpoint_travel_veto: bool
