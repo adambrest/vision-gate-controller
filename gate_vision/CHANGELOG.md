@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.5
+
+- Use Home Assistant's native state-aware gate icons instead of repeatedly
+  changing the static MQTT discovery icon.
+- Buffer terminal and unknown cover states for three seconds.
+- Ignore camera availability dropouts shorter than three seconds.
+
 ## 1.1.4
 
 - Rename the app to Vision Gate Controller.

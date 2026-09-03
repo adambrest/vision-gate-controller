@@ -19,21 +19,9 @@ STATE_TOPIC = "gate_vision/main_gate/state"
 ATTRIBUTES_TOPIC = "gate_vision/main_gate/attributes"
 AVAILABILITY_TOPIC = "gate_vision/status"
 
-ALERT_ICON = "mdi:boom-gate-alert"
-ICON_SWITCH_DELAY_SECONDS = 3.0
-DIRECTION_ICONS = {
-    "mdi:boom-gate-arrow-down",
-    "mdi:boom-gate-arrow-up",
-}
-STATE_ICONS = {
-    "CLOSED": "mdi:boom-gate",
-    "OPEN": "mdi:boom-gate-up",
-    "CLOSING": "mdi:boom-gate-arrow-down",
-    "OPENING": "mdi:boom-gate-arrow-up",
-    "PARTIAL": ALERT_ICON,
-    "PARTIALLY_OPEN": ALERT_ICON,
-    "UNKNOWN": ALERT_ICON,
-}
+STATE_SWITCH_DELAY_SECONDS = 3.0
+DIRECTION_STATES = {"CLOSING", "OPENING"}
+VALID_COVER_STATES = {"CLOSED", "CLOSING", "OPEN", "OPENING"}
 
 
 class MqttCover:
@@ -51,10 +39,11 @@ class MqttCover:
         self._client: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connected: asyncio.Event | None = None
-        self._published_icon: str | None = None
-        self._display_icon: str | None = None
-        self._pending_icon: str | None = None
-        self._pending_icon_since: float | None = None
+        self._display_state: str | None = None
+        self._pending_state: str | None = None
+        self._pending_state_since: float | None = None
+        self._display_availability: str | None = None
+        self._offline_pending_since: float | None = None
 
     def set_controller(self, controller: GateController) -> None:
         self.controller = controller
@@ -97,9 +86,8 @@ class MqttCover:
             return
         client.subscribe(COMMAND_TOPIC, qos=1)
         status = self.status_provider()
-        icon = self._buffered_icon(status)
-        self._publish_discovery(client, icon)
-        availability = "online" if status.get("available") else "offline"
+        self._publish_discovery(client)
+        availability = self._buffered_availability(status)
         client.publish(AVAILABILITY_TOPIC, availability, qos=1, retain=True)
         if self._loop is not None and self._connected is not None:
             self._loop.call_soon_threadsafe(self._connected.set)
@@ -128,11 +116,9 @@ class MqttCover:
         if self._client is None:
             return
         status = self.status_provider()
-        availability = "online" if status.get("available") else "offline"
-        state = status["cover_state"] if status["cover_state"] != "UNKNOWN" else "None"
-        icon = self._buffered_icon(status)
-        if icon != self._published_icon:
-            self._publish_discovery(self._client, icon)
+        availability = self._buffered_availability(status)
+        buffered_state = self._buffered_state(status)
+        state = buffered_state if buffered_state != "UNKNOWN" else "None"
         self._client.publish(AVAILABILITY_TOPIC, availability, qos=1, retain=True)
         self._client.publish(STATE_TOPIC, state, qos=1, retain=True)
         self._client.publish(
@@ -149,64 +135,81 @@ class MqttCover:
         self._client.disconnect()
         self._client.loop_stop()
         self._client = None
-        self._published_icon = None
-        self._display_icon = None
-        self._pending_icon = None
-        self._pending_icon_since = None
+        self._display_state = None
+        self._pending_state = None
+        self._pending_state_since = None
+        self._display_availability = None
+        self._offline_pending_since = None
 
-    def _publish_discovery(self, client: Any, icon: str) -> None:
+    def _publish_discovery(self, client: Any) -> None:
         client.publish(
             DISCOVERY_TOPIC,
-            json.dumps(self.discovery_payload(icon)),
+            json.dumps(self.discovery_payload()),
             qos=1,
             retain=True,
         )
-        self._published_icon = icon
 
-    @staticmethod
-    def icon_for_status(status: dict[str, Any]) -> str:
-        if not status.get("available"):
-            return ALERT_ICON
-        return STATE_ICONS.get(str(status.get("cover_state", "UNKNOWN")), ALERT_ICON)
-
-    def _buffered_icon(self, status: dict[str, Any]) -> str:
-        """Hold the current icon until a new non-direction state is stable."""
-        candidate = self.icon_for_status(status)
+    def _buffered_state(self, status: dict[str, Any]) -> str:
+        """Hold cover state so Home Assistant's native gate icon cannot jitter."""
+        candidate = str(status.get("cover_state", "UNKNOWN"))
+        if candidate not in VALID_COVER_STATES:
+            candidate = "UNKNOWN"
         now = self._clock()
 
-        if self._display_icon is None or candidate in DIRECTION_ICONS:
-            self._display_icon = candidate
-            self._pending_icon = None
-            self._pending_icon_since = None
+        if self._display_state is None or candidate in DIRECTION_STATES:
+            self._display_state = candidate
+            self._pending_state = None
+            self._pending_state_since = None
             return candidate
 
-        if candidate == self._display_icon:
-            self._pending_icon = None
-            self._pending_icon_since = None
-            return self._display_icon
+        if candidate == self._display_state:
+            self._pending_state = None
+            self._pending_state_since = None
+            return self._display_state
 
-        if candidate != self._pending_icon:
-            self._pending_icon = candidate
-            self._pending_icon_since = now
-            return self._display_icon
+        if candidate != self._pending_state:
+            self._pending_state = candidate
+            self._pending_state_since = now
+            return self._display_state
 
-        assert self._pending_icon_since is not None
-        if now - self._pending_icon_since >= ICON_SWITCH_DELAY_SECONDS:
-            self._display_icon = candidate
-            self._pending_icon = None
-            self._pending_icon_since = None
+        assert self._pending_state_since is not None
+        if now - self._pending_state_since >= STATE_SWITCH_DELAY_SECONDS:
+            self._display_state = candidate
+            self._pending_state = None
+            self._pending_state_since = None
 
-        return self._display_icon
+        return self._display_state
+
+    def _buffered_availability(self, status: dict[str, Any]) -> str:
+        """Require a sustained outage before marking the cover unavailable."""
+        candidate = "online" if status.get("available") else "offline"
+        now = self._clock()
+
+        if self._display_availability is None:
+            self._display_availability = candidate
+            return candidate
+        if candidate == "online":
+            self._display_availability = "online"
+            self._offline_pending_since = None
+            return "online"
+        if self._display_availability == "offline":
+            return "offline"
+        if self._offline_pending_since is None:
+            self._offline_pending_since = now
+            return "online"
+        if now - self._offline_pending_since >= STATE_SWITCH_DELAY_SECONDS:
+            self._display_availability = "offline"
+            self._offline_pending_since = None
+        return self._display_availability
 
     @staticmethod
-    def discovery_payload(icon: str = ALERT_ICON) -> dict[str, Any]:
+    def discovery_payload() -> dict[str, Any]:
         return {
             "name": "Main Gate",
             "unique_id": "gate_vision_main_gate",
             "object_id": "main_gate",
             "default_entity_id": "cover.main_gate",
             "device_class": "gate",
-            "icon": icon,
             "command_topic": COMMAND_TOPIC,
             "state_topic": STATE_TOPIC,
             "json_attributes_topic": ATTRIBUTES_TOPIC,

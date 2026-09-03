@@ -11,9 +11,11 @@ Vision Gate Controller is a Home Assistant app that publishes `cover.main_gate` 
 
 Position and motion are independent. For example, the gate can be `PARTIALLY_OPEN` and `MOVING` simultaneously. No command or retry is sent while motion is detected.
 
-The directional OPENING/CLOSING icon is held through brief vision outliers. A
-different terminal or alert icon is shown only after that candidate state has
-remained stable for three seconds.
+Home Assistant supplies its native state-aware gate icons. The published
+OPENING/CLOSING state is held through brief vision outliers, and a different
+terminal or unknown state is published only after it has remained stable for
+three seconds. Camera dropouts must also last three seconds before the entity
+is marked unavailable.
 
 ## Bounded recovery
 
