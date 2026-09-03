@@ -29,13 +29,27 @@ GATE_POLYGON = (
 )
 CLASSIFIER_SIZE = (160, 96)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-# Camera frames are decoded at half size. The polygon is scaled from the frame
-# dimensions, so this only trades detail we discard anyway for CPU and memory.
+# Large frames decode at half size to save CPU and memory; the polygon scales
+# from the frame dimensions, so geometry is unaffected. Small frames are kept
+# whole, so reference captures and live frames meet at comparable detail.
 DECODE_FLAG = cv2.IMREAD_REDUCED_COLOR_2
+MIN_WORKING_WIDTH = 640
 TRAVEL_COLUMNS = 256
 TRAVEL_ROWS = 128
 # Background columns that end the gate leaf's contiguous run.
 TRAVEL_EDGE_GAP = 6
+
+
+def decode_frame(encoded: np.ndarray) -> np.ndarray | None:
+    """Decode a camera frame, halving it only when detail can be spared."""
+    frame = cv2.imdecode(encoded, DECODE_FLAG)
+    if frame is None or frame.size == 0 or frame.shape[1] >= MIN_WORKING_WIDTH:
+        return frame
+    return cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+
+
+def read_frame(path: Path) -> np.ndarray | None:
+    return decode_frame(np.fromfile(path, dtype=np.uint8))
 
 
 def scaled_gate_points(width: int, height: int) -> dict[str, tuple[float, float]]:
@@ -241,8 +255,9 @@ class ReferenceClassifier:
             for path in sorted(directory.iterdir()):
                 if path.suffix.lower() not in IMAGE_EXTENSIONS:
                     continue
-                # Decoded exactly like a live frame so calibration matches.
-                frame = cv2.imread(str(path), DECODE_FLAG)
+                # Decoded exactly like a live frame, so calibration and
+                # measurement see the same detail.
+                frame = read_frame(path)
                 if frame is None or frame.size == 0:
                     LOGGER.error("Unreadable reference: %s", path.name)
                     continue

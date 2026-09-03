@@ -5,11 +5,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import quote
 
-import cv2
 import httpx
 import numpy as np
 
-from app.vision import DECODE_FLAG
+from app.vision import decode_frame
 
 
 CORE_API = "http://supervisor/core/api"
@@ -52,9 +51,7 @@ class HomeAssistantClient:
         )
         response.raise_for_status()
         encoded = np.frombuffer(response.content, dtype=np.uint8)
-        # Half-size decode: a quarter of the pixels, and the gate polygon is
-        # scaled from the frame dimensions so geometry is unaffected.
-        frame = cv2.imdecode(encoded, DECODE_FLAG)
+        frame = decode_frame(encoded)
         if frame is None or frame.size == 0:
             raise ValueError("Home Assistant camera response is not a valid image")
         return frame

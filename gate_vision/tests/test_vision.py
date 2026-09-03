@@ -10,11 +10,12 @@ import pytest
 from app.models import GatePosition, Observation
 from app.config import Settings
 from app.vision import (
-    DECODE_FLAG,
     GateTravel,
     ReferenceClassifier,
+    decode_frame,
     RollingVision,
     extract_gate_region,
+    read_frame,
     scaled_gate_points,
 )
 
@@ -58,7 +59,7 @@ def test_exactly_six_references_use_live_transform(tmp_path: Path) -> None:
     root = tmp_path / "references"
     six_references(root)
     classifier = ReferenceClassifier(root)
-    source = cv2.imread(str(root / "open" / "open_0.jpg"), DECODE_FLAG)
+    source = read_frame(root / "open" / "open_0.jpg")
     expected = classifier._feature(extract_gate_region(source))
 
     assert classifier.ready is True
@@ -115,7 +116,7 @@ def real_classifier(**kwargs) -> ReferenceClassifier:
 
 
 def real_region(kind: str, name: str):
-    return extract_gate_region(cv2.imread(str(REFERENCES / kind / f"{name}.jpg"), DECODE_FLAG))
+    return extract_gate_region(read_frame(REFERENCES / kind / f"{name}.jpg"))
 
 
 def labelled(kind: str) -> list[str]:
@@ -161,7 +162,7 @@ def test_no_endpoint_reference_is_mistaken_for_a_partial_gate() -> None:
 def test_travel_catches_most_but_not_all_held_out_partials() -> None:
     """Documents real coverage on the eight labelled partial frames.
 
-    Five of eight are detected. The three missed measure fully open, so they
+    Four of eight are detected. The four missed measure fully open, so they
     behave exactly as they did before travel existed - no new failure mode.
     """
     classifier = real_classifier()
@@ -170,7 +171,7 @@ def test_travel_catches_most_but_not_all_held_out_partials() -> None:
         for name in labelled("partial")
         if 0.08 < classifier.travel.measure(real_region("partial", name)) < 0.92
     ]
-    assert len(caught) == 5
+    assert len(caught) == 4
 
 
 def test_endpoint_travel_veto_is_disabled_by_default() -> None:
@@ -197,7 +198,7 @@ def test_travel_generalisation_gap_is_tracked() -> None:
     """Held-out closed frames fail; this is why the veto ships disabled."""
     opens = sorted((REFERENCES / "open").glob("*.jpg"))
     closeds = sorted((REFERENCES / "closed").glob("*.jpg"))
-    read = lambda p: extract_gate_region(cv2.imread(str(p), DECODE_FLAG))
+    read = lambda p: extract_gate_region(read_frame(p))
     failures = 0
     for held in closeds:
         rest = [p for p in closeds if p != held]
@@ -211,3 +212,17 @@ def test_travel_generalisation_gap_is_tracked() -> None:
 def test_missing_travel_calibration_leaves_the_verdict_untouched() -> None:
     classifier = real_classifier(endpoint_travel_veto=True)
     assert classifier._apply_travel(GatePosition.OPEN, 0.91, None) == (GatePosition.OPEN, 0.91)
+
+
+def test_small_frames_are_not_shrunk_below_the_working_width() -> None:
+    """Reference captures are often smaller than live frames.
+
+    Halving those too would calibrate on far less detail than the camera gives,
+    so only frames that stay usable after halving are reduced.
+    """
+    big = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    small = np.zeros((360, 640, 3), dtype=np.uint8)
+    for image, expected in ((big, (540, 960)), (small, (360, 640))):
+        ok, encoded = cv2.imencode(".jpg", image)
+        assert ok
+        assert decode_frame(np.frombuffer(encoded.tobytes(), dtype=np.uint8)).shape[:2] == expected

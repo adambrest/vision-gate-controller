@@ -74,7 +74,51 @@ rain, headlights - to `references/open` and `references/closed`, publish a new
 version, and re-check. `references/partial` holds labelled partial frames used
 only for testing; the classifier never loads them.
 
-## Safety behavior## Safety behavior
+## Testing frames offline
+
+`tools/classify.py` runs any image through the production pipeline, so edge
+cases can be checked before trusting them. Run it from the `gate_vision`
+directory:
+
+```bash
+python -m tools.classify frame.jpg                    # one frame
+python -m tools.classify ~/captures --expect partial   # a labelled folder
+python -m tools.classify frame.jpg --annotate out/     # draw the leading edge
+python -m tools.classify frame.jpg --veto              # with the veto enabled
+```
+
+It reports the vision position and confidence, measured gate travel, the
+open/closed/partial scores, and the cover state the frame would produce if it
+persisted. `--annotate` writes an image with the gate polygon drawn on the
+frame and the detected leading edge drawn on the rectified region, which is the
+quickest way to see why a frame was read the way it was.
+
+Capture reference and test frames at the camera's full resolution where
+possible. Frames smaller than the live feed calibrate on less detail.
+
+## Safety behavior## Testing frames offline
+
+`tools/classify.py` runs any image through the production pipeline, so edge
+cases can be checked before trusting them. Run it from the `gate_vision`
+directory:
+
+```bash
+python -m tools.classify frame.jpg                    # one frame
+python -m tools.classify ~/captures --expect partial   # a labelled folder
+python -m tools.classify frame.jpg --annotate out/     # draw the leading edge
+python -m tools.classify frame.jpg --veto              # with the veto enabled
+```
+
+It reports the vision position and confidence, measured gate travel, the
+open/closed/partial scores, and the cover state the frame would produce if it
+persisted. `--annotate` writes an image with the gate polygon drawn on the
+frame and the detected leading edge drawn on the rectified region, which is the
+quickest way to see why a frame was read the way it was.
+
+Capture reference and test frames at the camera's full resolution where
+possible. Frames smaller than the live feed calibrate on less detail.
+
+## Safety behavior
 
 - Startup never pulses the relay.
 - Restart discards any prior in-progress command and re-establishes state from camera frames.

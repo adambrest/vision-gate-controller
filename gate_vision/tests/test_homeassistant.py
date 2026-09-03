@@ -16,7 +16,7 @@ async def test_internal_camera_and_script_endpoints() -> None:
         calls.append((request.method, request.url.path))
         assert request.headers["Authorization"] == "Bearer supervisor-test"
         if request.method == "GET":
-            image = np.zeros((480, 640, 3), dtype=np.uint8)
+            image = np.zeros((1080, 1920, 3), dtype=np.uint8)
             ok, encoded = cv2.imencode(".jpg", image)
             assert ok
             return httpx.Response(200, content=encoded.tobytes(), headers={"content-type": "image/jpeg"})
@@ -31,8 +31,8 @@ async def test_internal_camera_and_script_endpoints() -> None:
         client=async_client,
     )
 
-    # Frames are decoded at half size to cut CPU and memory on the gateway.
-    assert (await client.camera_frame()).shape == (240, 320, 3)
+    # A full-size camera frame is halved to cut CPU and memory on the gateway.
+    assert (await client.camera_frame()).shape == (540, 960, 3)
     assert (await client.pulse_gate()).success is True
     assert calls == [
         ("GET", "/core/api/camera_proxy/camera.garage_high_resolution_channel"),

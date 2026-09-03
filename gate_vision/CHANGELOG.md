@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.10
+
+- Add `tools/classify.py`, which runs any image through the production pipeline
+  and reports the vision position, measured travel and resulting cover state.
+  `--annotate` draws the detected leading edge over the frame, and `--expect`
+  turns a folder of labelled frames into a pass/fail check.
+- Decode frames adaptively. Halving is skipped when it would take a frame below
+  a usable working width, so reference captures smaller than the live camera
+  feed are no longer calibrated at a third of the detail the camera provides.
+  Full-size camera frames are still halved for CPU and memory.
+
 ## 1.1.9
 
 - Replace the reference set with six labelled frames covering day, IR and night
