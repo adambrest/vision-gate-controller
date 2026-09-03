@@ -17,6 +17,30 @@ class GateTarget(StrEnum):
     CLOSED = "CLOSED"
 
 
+class CoverState(StrEnum):
+    """The only cover states Home Assistant accepts for `cover.main_gate`.
+
+    Home Assistant additionally renders the entity as `unavailable` on its own
+    when availability is withdrawn, so there is no member for it here.
+    """
+
+    OPEN = "open"
+    CLOSED = "closed"
+    OPENING = "opening"
+    CLOSING = "closing"
+    UNKNOWN = "unknown"
+
+
+class VisionState(StrEnum):
+    """Internal diagnostic classification. Never a Home Assistant cover state."""
+
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+    PARTIAL = "PARTIAL"
+    MOVING = "MOVING"
+    UNKNOWN = "UNKNOWN"
+
+
 class ControllerState(StrEnum):
     IDLE = "IDLE"
     VALIDATING_STATE = "VALIDATING_STATE"

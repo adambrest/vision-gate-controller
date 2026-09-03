@@ -18,6 +18,7 @@ class Settings:
     partial_stall_seconds: float = 10.0
     wrong_endpoint_seconds: float = 5.0
     max_gate_attempts: int = 3
+    camera_unavailable_after_seconds: float = 15.0
 
     @classmethod
     def from_options(cls, path: Path = Path("/data/options.json")) -> "Settings":
@@ -36,3 +37,7 @@ class Settings:
             raise ValueError("max_gate_attempts must be 3 (initial pulse plus two retries)")
         if self.moving_interval_seconds > self.snapshot_interval_seconds:
             raise ValueError("moving polling interval cannot exceed the normal interval")
+        if self.camera_unavailable_after_seconds < self.snapshot_interval_seconds:
+            raise ValueError(
+                "camera_unavailable_after_seconds must outlast a single camera frame"
+            )

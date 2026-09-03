@@ -239,6 +239,7 @@ class VisionSnapshot:
     confirmed: GatePosition
     observations: tuple[Observation, ...]
     version: int
+    confirmation_current: bool = False
 
     def stationary_duration(
         self,
@@ -270,6 +271,7 @@ class RollingVision:
         self.required = required
         self._observations: deque[Observation] = deque(maxlen=max(6, history))
         self._confirmed = GatePosition.UNKNOWN
+        self._current = False
         self._version = 0
         self._condition = asyncio.Condition()
 
@@ -278,15 +280,15 @@ class RollingVision:
             self._observations.append(observation)
             recent = tuple(self._observations)[-self.window :]
             for position in (GatePosition.OPEN, GatePosition.CLOSED):
-                matches = sum(
-                    item.position == position
-                    and item.confidence >= 0.80
-                    and not item.is_moving
-                    for item in recent
-                )
-                if matches >= self.required:
+                if self._support(position, recent) >= self.required:
                     self._confirmed = position
                     break
+            # A confirmation the rolling window no longer supports is stale, so
+            # the gate state it implies must not be reported indefinitely.
+            self._current = self._confirmed in (
+                GatePosition.OPEN,
+                GatePosition.CLOSED,
+            ) and self._support(self._confirmed, recent) >= self.required
             self._version += 1
             snapshot = self._snapshot()
             self._condition.notify_all()
@@ -304,9 +306,22 @@ class RollingVision:
             )
             return self._snapshot()
 
+    @staticmethod
+    def _support(position: GatePosition, recent: tuple[Observation, ...]) -> int:
+        return sum(
+            item.position == position and item.confidence >= 0.80 and not item.is_moving
+            for item in recent
+        )
+
     def _snapshot(self) -> VisionSnapshot:
         latest = self._observations[-1] if self._observations else Observation(
             GatePosition.UNKNOWN,
             0.0,
         )
-        return VisionSnapshot(latest, self._confirmed, tuple(self._observations), self._version)
+        return VisionSnapshot(
+            latest,
+            self._confirmed,
+            tuple(self._observations),
+            self._version,
+            self._current,
+        )

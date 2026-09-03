@@ -4,12 +4,11 @@ import asyncio
 import json
 import logging
 import os
-import time
 from collections.abc import Callable
 from typing import Any
 
 from app.gate_controller import GateController, OperationInProgressError
-from app.models import GateTarget
+from app.models import CoverState, GateTarget
 
 
 LOGGER = logging.getLogger(__name__)
@@ -19,42 +18,23 @@ STATE_TOPIC = "gate_vision/main_gate/state"
 ATTRIBUTES_TOPIC = "gate_vision/main_gate/attributes"
 AVAILABILITY_TOPIC = "gate_vision/status"
 
-ALERT_ICON = "mdi:boom-gate-alert"
-STATE_SWITCH_DELAY_SECONDS = 3.0
-DIRECTION_STATES = {"CLOSING", "OPENING"}
-VALID_COVER_STATES = {"CLOSED", "CLOSING", "OPEN", "OPENING"}
-STATE_ICONS = {
-    "CLOSED": "mdi:boom-gate",
-    "OPEN": "mdi:boom-gate-up",
-    "CLOSING": "mdi:boom-gate-arrow-down",
-    "OPENING": "mdi:boom-gate-arrow-up",
-    "PARTIAL": ALERT_ICON,
-    "PARTIALLY_OPEN": ALERT_ICON,
-    "UNKNOWN": ALERT_ICON,
-}
+# Home Assistant's MQTT cover reads this payload as "state is unknown".
+PAYLOAD_UNKNOWN = "None"
 
 
 class MqttCover:
-    """MQTT Discovery bridge for the single production cover entity."""
+    """MQTT Discovery bridge for the single production cover entity.
 
-    def __init__(
-        self,
-        status_provider: Callable[[], dict[str, Any]],
-        *,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
+    It transports state; it does not decide state, and it holds no opinion on
+    how Home Assistant presents the entity.
+    """
+
+    def __init__(self, status_provider: Callable[[], dict[str, Any]]) -> None:
         self.status_provider = status_provider
-        self._clock = clock
         self.controller: GateController | None = None
         self._client: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connected: asyncio.Event | None = None
-        self._published_icon: str | None = None
-        self._display_state: str | None = None
-        self._pending_state: str | None = None
-        self._pending_state_since: float | None = None
-        self._display_availability: str | None = None
-        self._offline_pending_since: float | None = None
 
     def set_controller(self, controller: GateController) -> None:
         self.controller = controller
@@ -96,15 +76,13 @@ class MqttCover:
             LOGGER.error("MQTT connection failed: %s", reason_code)
             return
         client.subscribe(COMMAND_TOPIC, qos=1)
-        status = self.status_provider()
-        availability = self._buffered_availability(status)
-        buffered_state = self._buffered_state(status)
-        icon = self.icon_for_state(
-            buffered_state,
-            available=bool(status.get("available")),
+        client.publish(DISCOVERY_TOPIC, json.dumps(self.discovery_payload()), qos=1, retain=True)
+        client.publish(
+            AVAILABILITY_TOPIC,
+            self._availability(self.status_provider()),
+            qos=1,
+            retain=True,
         )
-        self._publish_discovery(client, icon)
-        client.publish(AVAILABILITY_TOPIC, availability, qos=1, retain=True)
         if self._loop is not None and self._connected is not None:
             self._loop.call_soon_threadsafe(self._connected.set)
         LOGGER.info("MQTT cover discovery published")
@@ -132,17 +110,13 @@ class MqttCover:
         if self._client is None:
             return
         status = self.status_provider()
-        availability = self._buffered_availability(status)
-        buffered_state = self._buffered_state(status)
-        state = buffered_state if buffered_state != "UNKNOWN" else "None"
-        icon = self.icon_for_state(
-            buffered_state,
-            available=bool(status.get("available")),
+        self._client.publish(
+            AVAILABILITY_TOPIC,
+            self._availability(status),
+            qos=1,
+            retain=True,
         )
-        if icon != self._published_icon:
-            self._publish_discovery(self._client, icon)
-        self._client.publish(AVAILABILITY_TOPIC, availability, qos=1, retain=True)
-        self._client.publish(STATE_TOPIC, state, qos=1, retain=True)
+        self._client.publish(STATE_TOPIC, self.state_payload(status), qos=1, retain=True)
         self._client.publish(
             ATTRIBUTES_TOPIC,
             json.dumps(status, separators=(",", ":")),
@@ -157,100 +131,38 @@ class MqttCover:
         self._client.disconnect()
         self._client.loop_stop()
         self._client = None
-        self._published_icon = None
-        self._display_state = None
-        self._pending_state = None
-        self._pending_state_since = None
-        self._display_availability = None
-        self._offline_pending_since = None
-
-    def _publish_discovery(self, client: Any, icon: str) -> None:
-        client.publish(
-            DISCOVERY_TOPIC,
-            json.dumps(self.discovery_payload(icon)),
-            qos=1,
-            retain=True,
-        )
-        self._published_icon = icon
 
     @staticmethod
-    def icon_for_state(state: str, *, available: bool) -> str:
-        if not available:
-            return ALERT_ICON
-        return STATE_ICONS.get(state, ALERT_ICON)
-
-    def _buffered_state(self, status: dict[str, Any]) -> str:
-        """Hold cover state so its dynamic icon cannot jitter."""
-        candidate = str(status.get("cover_state", "UNKNOWN"))
-        if candidate not in VALID_COVER_STATES:
-            candidate = "UNKNOWN"
-        now = self._clock()
-
-        if self._display_state is None or candidate in DIRECTION_STATES:
-            self._display_state = candidate
-            self._pending_state = None
-            self._pending_state_since = None
-            return candidate
-
-        if candidate == self._display_state:
-            self._pending_state = None
-            self._pending_state_since = None
-            return self._display_state
-
-        if candidate != self._pending_state:
-            self._pending_state = candidate
-            self._pending_state_since = now
-            return self._display_state
-
-        assert self._pending_state_since is not None
-        if now - self._pending_state_since >= STATE_SWITCH_DELAY_SECONDS:
-            self._display_state = candidate
-            self._pending_state = None
-            self._pending_state_since = None
-
-        return self._display_state
-
-    def _buffered_availability(self, status: dict[str, Any]) -> str:
-        """Require a sustained outage before marking the cover unavailable."""
-        candidate = "online" if status.get("available") else "offline"
-        now = self._clock()
-
-        if self._display_availability is None:
-            self._display_availability = candidate
-            return candidate
-        if candidate == "online":
-            self._display_availability = "online"
-            self._offline_pending_since = None
-            return "online"
-        if self._display_availability == "offline":
-            return "offline"
-        if self._offline_pending_since is None:
-            self._offline_pending_since = now
-            return "online"
-        if now - self._offline_pending_since >= STATE_SWITCH_DELAY_SECONDS:
-            self._display_availability = "offline"
-            self._offline_pending_since = None
-        return self._display_availability
+    def state_payload(status: dict[str, Any]) -> str:
+        state = str(status.get("cover_state", CoverState.UNKNOWN.value))
+        if state == CoverState.UNKNOWN.value:
+            return PAYLOAD_UNKNOWN
+        return state
 
     @staticmethod
-    def discovery_payload(icon: str = ALERT_ICON) -> dict[str, Any]:
+    def _availability(status: dict[str, Any]) -> str:
+        return "online" if status.get("available") else "offline"
+
+    @staticmethod
+    def discovery_payload() -> dict[str, Any]:
         return {
             "name": "Main Gate",
             "unique_id": "gate_vision_main_gate",
             "object_id": "main_gate",
             "default_entity_id": "cover.main_gate",
             "device_class": "gate",
-            "icon": icon,
             "command_topic": COMMAND_TOPIC,
             "state_topic": STATE_TOPIC,
             "json_attributes_topic": ATTRIBUTES_TOPIC,
             "availability_topic": AVAILABILITY_TOPIC,
             "payload_open": "OPEN",
             "payload_close": "CLOSE",
-            "state_open": "OPEN",
-            "state_closed": "CLOSED",
-            "state_opening": "OPENING",
-            "state_closing": "CLOSING",
+            # A toggle relay cannot halt travel, so STOP is not advertised.
+            "payload_stop": None,
+            "state_open": CoverState.OPEN.value,
+            "state_closed": CoverState.CLOSED.value,
+            "state_opening": CoverState.OPENING.value,
+            "state_closing": CoverState.CLOSING.value,
             "optimistic": False,
             "qos": 1,
             "device": {

@@ -25,6 +25,16 @@ provides an Ingress dashboard for status and control.
 See the [Vision Gate Controller documentation](./gate_vision/DOCS.md) for prerequisites,
 configuration, operation, and safety behavior.
 
+## Ownership
+
+Gate Vision owns the physical gate state, vision classification, controller
+state, and command verification. Home Assistant owns presentation: the dashboard
+icon, icon templating, and HomeKit presentation. The app publishes no icon.
+
+`cover.main_gate` uses only the valid Home Assistant Cover states `open`,
+`closed`, `opening`, `closing`, and `unknown`, and Home Assistant renders it as
+`unavailable` when availability is withdrawn.
+
 ## Apps
 
 ### [Vision Gate Controller](./gate_vision)

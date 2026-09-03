@@ -11,12 +11,69 @@ Vision Gate Controller is a Home Assistant app that publishes `cover.main_gate` 
 
 Position and motion are independent. For example, the gate can be `PARTIALLY_OPEN` and `MOVING` simultaneously. No command or retry is sent while motion is detected.
 
-The cover uses explicit boom-gate icons for closed, open, closing, and opening
-states. Partial, unknown, untrusted, and camera-unavailable states use the
-boom-gate alert icon. The published OPENING/CLOSING state is held through brief
-vision outliers, and a different terminal or unknown state is published only
-after it has remained stable for three seconds. Camera dropouts must also last
-three seconds before the entity is marked unavailable.
+## Ownership
+
+Vision Gate Controller owns the physical gate state, vision classification,
+controller state, and command verification. Home Assistant owns everything
+about presentation: the dashboard icon, any icon templating or customisation,
+and the HomeKit presentation. The app publishes no icon and contains no
+icon-selection logic, so icons are changed entirely in Home Assistant.
+
+## Home Assistant cover states
+
+`cover.main_gate` publishes only valid Home Assistant Cover states:
+
+| State | Meaning |
+| --- | --- |
+| `open` | Rolling camera confirmation currently says OPEN. |
+| `closed` | Rolling camera confirmation currently says CLOSED. |
+| `opening` | An OPEN command was accepted and is still in progress. |
+| `closing` | A CLOSE command was accepted and is still in progress. |
+| `unknown` | No operation is active and vision is not confidently OPEN or CLOSED. |
+| `unavailable` | Home Assistant's own state when availability is withdrawn. |
+
+`get_effective_cover_state()` in `app/cover_state.py` is the single source of
+truth and applies exactly these rules, in order:
+
+1. An active operation targeting OPEN reports `opening`.
+2. An active operation targeting CLOSED reports `closing`.
+3. A current rolling confirmation of OPEN reports `open`.
+4. A current rolling confirmation of CLOSED reports `closed`.
+5. Anything else reports `unknown`.
+
+`opening` and `closing` are published the moment GateController accepts the
+command, without waiting for the next camera frame. A confirmation the rolling
+window no longer supports is treated as stale, so a previously confirmed
+position is never reported indefinitely.
+
+Custom states such as `partial`, `moving`, `fault`, `stopped`, or `error` are
+never emitted. They exist internally and are exposed as attributes only:
+`vision_state`, `raw_state`, `confirmed_state`, `controller_state`,
+`target_state`, `confidence`, `fault`, `fault_reason`, and `last_result`. A
+gate stopped mid-travel therefore reports cover state `unknown` with
+`vision_state: PARTIAL`, `fault: true`, and
+`fault_reason: gate_stopped_mid_travel`.
+
+## Availability
+
+Availability is tracked separately from gate position. The entity is available
+while the app is running, Home Assistant communication works, and the camera is
+usable for gate-state monitoring. A single failed camera frame never withdraws
+it; the camera must stay offline for `camera_unavailable_after_seconds`
+(default 15). A dependency that makes gate-state monitoring impossible, such as
+a missing reference set, withdraws availability immediately. Availability
+returns as soon as camera frames resume.
+
+Home Assistant is pushed a fresh entity update whenever opening or closing
+begins, OPEN or CLOSED is confirmed, an operation fails or aborts, the state
+becomes unknown, availability changes, or a diagnostic fault changes. No manual
+refresh or unrelated polling delay is involved.
+
+## Supported actions
+
+`cover.main_gate` keeps device class `gate` and advertises OPEN and CLOSE only.
+Set position, tilt, and stop are deliberately not advertised: the gate is a
+toggle relay verified by camera, and travel cannot be halted on command.
 
 ## Bounded recovery
 
@@ -46,8 +103,11 @@ All MQTT traffic remains inside Home Assistant. Camera and relay access use `htt
 ## Web control
 
 The Ingress page is always on and deliberately minimal. It shows camera availability,
-the current detected position, motion, the queued target, OPEN/CLOSE controls, and the
-latest camera frame. The controls call the same GateController as `cover.main_gate`.
+the latest camera frame, OPEN/CLOSE controls, and the richer internal states. It
+distinguishes the formal Home Assistant cover state from the diagnostics beside
+it, so `Home Assistant state: opening`, `Vision state: MOVING`, and
+`Controller target: OPEN` are shown as separate rows. The controls call the same
+GateController as `cover.main_gate`.
 
 Camera sampling is fixed at 1 Hz while stationary and 4 Hz after movement is detected.
 Old polling values retained in an existing App's `options.json` are ignored. The browser

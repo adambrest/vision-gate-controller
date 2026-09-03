@@ -2,9 +2,12 @@ const elements = {
   availability: document.querySelector("#availability"),
   cameraStatus: document.querySelector("#camera-status"),
   frame: document.querySelector("#camera-frame"),
+  coverState: document.querySelector("#cover-state"),
+  visionState: document.querySelector("#vision-state"),
+  controllerTarget: document.querySelector("#controller-target"),
   detected: document.querySelector("#detected-state"),
   motion: document.querySelector("#motion"),
-  queued: document.querySelector("#queued-action"),
+  fault: document.querySelector("#fault"),
   message: document.querySelector("#message"),
   buttons: [...document.querySelectorAll("button[data-target]")],
 };
@@ -25,9 +28,13 @@ function render(status) {
   elements.availability.textContent = available ? "Available" : "Unavailable";
   elements.availability.classList.toggle("offline", !available);
   elements.cameraStatus.textContent = status.camera_online ? "Online" : "Offline";
+  // The cover state is what Home Assistant shows. The rest is diagnostics.
+  elements.coverState.textContent = available ? status.cover_state || "unknown" : "unavailable";
+  elements.visionState.textContent = status.vision_state || "UNKNOWN";
+  elements.controllerTarget.textContent = status.target_state || "None";
   elements.detected.textContent = status.raw_state || "UNKNOWN";
   elements.motion.textContent = status.is_moving ? "Moving" : "Stationary";
-  elements.queued.textContent = status.current_requested_target || "None";
+  elements.fault.textContent = status.fault ? status.fault_reason || "Fault" : "None";
   setControlsDisabled(!available || busy);
 
   if (status.last_camera_frame_time && status.last_camera_frame_time !== lastFrameTime) {

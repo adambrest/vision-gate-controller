@@ -67,7 +67,8 @@ class GateController:
 
     @property
     def active(self) -> bool:
-        return self._lock.locked()
+        """True while an accepted operation is still working towards its target."""
+        return self._lock.locked() and self.operation.result is OperationResult.IN_PROGRESS
 
     @property
     def requested_target(self) -> GateTarget | None:
@@ -82,14 +83,8 @@ class GateController:
         if self._lock.locked():
             raise OperationInProgressError("A gate operation is already in progress")
         await self._lock.acquire()
-        try:
-            return await self._run(target, source)
-        finally:
-            self._lock.release()
-            await self._notify()
-
-    async def _run(self, target: GateTarget, source: str) -> OperationResult:
-        snapshot = await self.vision.snapshot()
+        # Accepting the request is what makes the cover opening/closing, so the
+        # operation is recorded and pushed before any camera work is awaited.
         self.operation = Operation(
             target=target,
             source=source,
@@ -100,8 +95,15 @@ class GateController:
             started_at=datetime.now(UTC),
         )
         self._event(f"{target.value} requested by {source}")
-        await self._notify()
+        try:
+            await self._notify()
+            return await self._run(target)
+        finally:
+            self._lock.release()
+            await self._notify()
 
+    async def _run(self, target: GateTarget) -> OperationResult:
+        snapshot = await self.vision.snapshot()
         if snapshot.latest.is_moving:
             return await self._finish(
                 OperationResult.GATE_MOVING,
@@ -260,13 +262,6 @@ class GateController:
         self._event(f"Operation result: {result.value}")
         await self._notify()
         return result
-
-    def cover_state(self, confirmed: GatePosition) -> str:
-        if self.active and self.operation.target == GateTarget.OPEN:
-            return "OPENING"
-        if self.active and self.operation.target == GateTarget.CLOSED:
-            return "CLOSING"
-        return confirmed.value if confirmed in (GatePosition.OPEN, GatePosition.CLOSED) else "UNKNOWN"
 
     def _event(self, message: str) -> None:
         LOGGER.info(message)

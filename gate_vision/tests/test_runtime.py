@@ -6,22 +6,16 @@ import numpy as np
 import pytest
 
 from app.config import Settings
+from app.models import CoverState
 from app.mqtt_cover import (
-    ALERT_ICON,
+    ATTRIBUTES_TOPIC,
     AVAILABILITY_TOPIC,
     DISCOVERY_TOPIC,
     MqttCover,
-    STATE_SWITCH_DELAY_SECONDS,
+    PAYLOAD_UNKNOWN,
     STATE_TOPIC,
 )
 from app.web import _with_polygon
-
-
-class Clock:
-    now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
 
 
 class Client:
@@ -61,7 +55,7 @@ def test_stale_polling_options_are_ignored(tmp_path) -> None:
     assert settings.moving_interval_seconds == 0.25
 
 
-def test_web_ui_is_barebones() -> None:
+def test_debug_page_separates_home_assistant_state_from_diagnostics() -> None:
     html = (
         __import__("pathlib").Path(__file__).resolve().parents[1]
         / "app"
@@ -69,8 +63,9 @@ def test_web_ui_is_barebones() -> None:
         / "index.html"
     ).read_text(encoding="utf-8")
     assert "Camera" in html
-    assert "Detected state" in html
-    assert "Queued action" in html
+    assert "Home Assistant state" in html
+    assert "Vision state" in html
+    assert "Controller target" in html
     assert "EVENT LOG" not in html
     assert "REFERENCES" not in html
     assert "safety device" not in html
@@ -81,142 +76,122 @@ def test_mqtt_discovery_creates_main_gate_cover() -> None:
     assert payload["object_id"] == "main_gate"
     assert payload["default_entity_id"] == "cover.main_gate"
     assert payload["device_class"] == "gate"
-    assert payload["icon"] == ALERT_ICON
     assert payload["optimistic"] is False
 
 
+def test_discovery_declares_no_icon() -> None:
+    """Home Assistant owns presentation; the app never chooses an icon."""
+    assert "icon" not in MqttCover.discovery_payload()
+    assert "mdi:" not in json.dumps(MqttCover.discovery_payload())
+
+
+def test_discovery_advertises_only_open_and_close() -> None:
+    payload = MqttCover.discovery_payload()
+    assert payload["payload_open"] == "OPEN"
+    assert payload["payload_close"] == "CLOSE"
+    # A toggle relay cannot halt travel and there is no position or tilt sensor.
+    assert payload["payload_stop"] is None
+    for unsupported in (
+        "set_position_topic",
+        "position_topic",
+        "tilt_command_topic",
+        "tilt_status_topic",
+    ):
+        assert unsupported not in payload
+
+
+def test_discovery_maps_only_valid_home_assistant_cover_states() -> None:
+    payload = MqttCover.discovery_payload()
+    assert payload["state_open"] == CoverState.OPEN.value == "open"
+    assert payload["state_closed"] == CoverState.CLOSED.value == "closed"
+    assert payload["state_opening"] == CoverState.OPENING.value == "opening"
+    assert payload["state_closing"] == CoverState.CLOSING.value == "closing"
+
+
 @pytest.mark.parametrize(
-    ("available", "state", "icon"),
+    ("cover_state", "expected"),
     [
-        (True, "CLOSED", "mdi:boom-gate"),
-        (True, "OPEN", "mdi:boom-gate-up"),
-        (True, "CLOSING", "mdi:boom-gate-arrow-down"),
-        (True, "OPENING", "mdi:boom-gate-arrow-up"),
-        (True, "PARTIAL", ALERT_ICON),
-        (True, "PARTIALLY_OPEN", ALERT_ICON),
-        (True, "UNKNOWN", ALERT_ICON),
-        (False, "OPEN", ALERT_ICON),
+        ("closed", "closed"),
+        ("open", "open"),
+        ("opening", "opening"),
+        ("closing", "closing"),
+        ("unknown", PAYLOAD_UNKNOWN),
     ],
 )
-def test_main_gate_icon_tracks_trusted_cover_state(
-    available: bool,
-    state: str,
-    icon: str,
+def test_state_payload_publishes_home_assistant_cover_states(
+    cover_state: str,
+    expected: str,
 ) -> None:
-    assert MqttCover.icon_for_state(state, available=available) == icon
+    assert MqttCover.state_payload({"cover_state": cover_state}) == expected
 
 
 @pytest.mark.asyncio
-async def test_mqtt_discovery_icon_changes_with_buffered_state() -> None:
-    status = {"available": True, "cover_state": "CLOSED"}
+async def test_state_is_published_without_buffering() -> None:
+    """Opening must reach Home Assistant at once, not after a settling delay."""
+    status = {"available": True, "cover_state": "closed"}
+    mqtt = MqttCover(lambda: status)
+    client = Client()
+    mqtt._client = client
+
+    await mqtt.publish()
+    status["cover_state"] = "opening"
+    await mqtt.publish()
+    status["cover_state"] = "open"
+    await mqtt.publish()
+
+    assert messages(client, STATE_TOPIC) == ["closed", "opening", "open"]
+
+
+@pytest.mark.asyncio
+async def test_availability_follows_the_status_payload() -> None:
+    status = {"available": True, "cover_state": "open"}
+    mqtt = MqttCover(lambda: status)
+    client = Client()
+    mqtt._client = client
+
+    await mqtt.publish()
+    status["available"] = False
+    await mqtt.publish()
+    status["available"] = True
+    await mqtt.publish()
+
+    assert messages(client, AVAILABILITY_TOPIC) == ["online", "offline", "online"]
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_travel_as_attributes_not_as_the_cover_state() -> None:
+    status = {
+        "available": True,
+        "cover_state": "unknown",
+        "vision_state": "PARTIAL",
+        "fault": True,
+        "fault_reason": "gate_stopped_mid_travel",
+    }
+    mqtt = MqttCover(lambda: status)
+    client = Client()
+    mqtt._client = client
+    await mqtt.publish()
+
+    assert messages(client, STATE_TOPIC) == [PAYLOAD_UNKNOWN]
+    attributes = json.loads(messages(client, ATTRIBUTES_TOPIC)[-1])
+    assert attributes["vision_state"] == "PARTIAL"
+    assert attributes["fault"] is True
+    assert attributes["fault_reason"] == "gate_stopped_mid_travel"
+
+
+@pytest.mark.asyncio
+async def test_connect_publishes_discovery_once() -> None:
+    status = {"available": True, "cover_state": "closed"}
     mqtt = MqttCover(lambda: status)
     client = Client()
     mqtt._client = client
     mqtt._on_connect(client, None, None, 0, None)
 
     await mqtt.publish()
-    status["cover_state"] = "OPENING"
+    status["cover_state"] = "opening"
     await mqtt.publish()
 
-    discovery = [json.loads(payload) for payload in messages(client, DISCOVERY_TOPIC)]
-    assert [payload["icon"] for payload in discovery] == [
-        "mdi:boom-gate",
-        "mdi:boom-gate-arrow-up",
-    ]
-    assert messages(client, STATE_TOPIC)[-1] == "OPENING"
-
-
-@pytest.mark.asyncio
-async def test_camera_unavailable_immediately_uses_alert_icon() -> None:
-    clock = Clock()
-    status = {"available": True, "cover_state": "OPEN"}
-    mqtt = MqttCover(lambda: status, clock=clock)
-    client = Client()
-    mqtt._client = client
-
-    await mqtt.publish()
-    status["available"] = False
-    await mqtt.publish()
-
-    discovery = [json.loads(payload) for payload in messages(client, DISCOVERY_TOPIC)]
-    assert discovery[-1]["icon"] == ALERT_ICON
-    assert messages(client, AVAILABILITY_TOPIC)[-1] == "online"
-
-
-@pytest.mark.asyncio
-async def test_direction_state_is_held_through_brief_vision_hiccups() -> None:
-    clock = Clock()
-    status = {"available": True, "cover_state": "OPEN"}
-    mqtt = MqttCover(lambda: status, clock=clock)
-    client = Client()
-    mqtt._client = client
-
-    await mqtt.publish()
-    status["cover_state"] = "CLOSING"
-    await mqtt.publish()
-
-    for elapsed, outlier in ((0.5, "CLOSED"), (1.0, "OPEN"), (1.5, "UNKNOWN")):
-        clock.now = elapsed
-        status["cover_state"] = outlier
-        await mqtt.publish()
-
-    assert messages(client, STATE_TOPIC) == [
-        "OPEN",
-        "CLOSING",
-        "CLOSING",
-        "CLOSING",
-        "CLOSING",
-    ]
-
-    clock.now += STATE_SWITCH_DELAY_SECONDS - 0.1
-    await mqtt.publish()
-    assert messages(client, STATE_TOPIC)[-1] == "CLOSING"
-
-    clock.now += 0.11
-    await mqtt.publish()
-    assert messages(client, STATE_TOPIC)[-1] == "None"
-
-
-@pytest.mark.asyncio
-async def test_terminal_state_requires_a_stable_buffer_after_closing() -> None:
-    clock = Clock()
-    status = {"available": True, "cover_state": "CLOSING"}
-    mqtt = MqttCover(lambda: status, clock=clock)
-    client = Client()
-    mqtt._client = client
-
-    await mqtt.publish()
-    status["cover_state"] = "CLOSED"
-    await mqtt.publish()
-    clock.now = STATE_SWITCH_DELAY_SECONDS
-    await mqtt.publish()
-
-    assert messages(client, STATE_TOPIC) == ["CLOSING", "CLOSING", "CLOSED"]
-
-
-@pytest.mark.asyncio
-async def test_brief_camera_dropout_does_not_mark_cover_unavailable() -> None:
-    clock = Clock()
-    status = {"available": True, "cover_state": "OPEN"}
-    mqtt = MqttCover(lambda: status, clock=clock)
-    client = Client()
-    mqtt._client = client
-
-    await mqtt.publish()
-    status["available"] = False
-    await mqtt.publish()
-    clock.now = STATE_SWITCH_DELAY_SECONDS - 0.1
-    await mqtt.publish()
-    assert messages(client, AVAILABILITY_TOPIC) == ["online", "online", "online"]
-
-    status["available"] = True
-    await mqtt.publish()
-    status["available"] = False
-    clock.now = 4.0
-    await mqtt.publish()
-    clock.now = 4.0 + STATE_SWITCH_DELAY_SECONDS
-    await mqtt.publish()
-    assert messages(client, AVAILABILITY_TOPIC)[-1] == "offline"
+    assert len(messages(client, DISCOVERY_TOPIC)) == 1
 
 
 def test_web_frame_draws_fixed_polygon() -> None:

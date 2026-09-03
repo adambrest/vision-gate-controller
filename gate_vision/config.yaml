@@ -1,5 +1,5 @@
 name: "Vision Gate Controller"
-version: "1.1.6"
+version: "1.1.7"
 slug: "gate_vision"
 description: "Camera-verified main gate controller"
 url: "https://github.com/adambrest/vision-gate-controller/tree/main/gate_vision"
@@ -12,7 +12,6 @@ homeassistant_api: true
 ingress: true
 ingress_port: 8080
 panel_title: Vision Gate Controller
-panel_icon: mdi:boom-gate
 services:
   - mqtt:need
 image: "ghcr.io/adambrest/vision-gate-controller"
@@ -26,6 +25,7 @@ options:
   partial_stall_seconds: 10
   wrong_endpoint_seconds: 5
   max_gate_attempts: 3
+  camera_unavailable_after_seconds: 15
 schema:
   camera_entity: str
   gate_script: str
@@ -36,3 +36,4 @@ schema:
   partial_stall_seconds: float
   wrong_endpoint_seconds: float
   max_gate_attempts: int
+  camera_unavailable_after_seconds: float

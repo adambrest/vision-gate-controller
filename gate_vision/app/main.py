@@ -11,9 +11,15 @@ import numpy as np
 
 from app.camera import Camera
 from app.config import Settings
+from app.cover_state import (
+    Availability,
+    get_effective_cover_state,
+    get_fault,
+    get_vision_state,
+)
 from app.gate_controller import GateController, OperationInProgressError
 from app.homeassistant import HomeAssistantClient
-from app.models import GatePosition, GateTarget, Observation
+from app.models import GatePosition, GateTarget, Observation, OperationResult
 from app.mqtt_cover import MqttCover
 from app.vision import ReferenceClassifier, RollingVision
 
@@ -37,6 +43,8 @@ class Runtime:
         self.mqtt: MqttCover | None = None
         self.latest_observation = Observation(GatePosition.UNKNOWN, 0.0)
         self.confirmed_state = GatePosition.UNKNOWN
+        self.confirmation_current = False
+        self.availability = Availability(settings.camera_unavailable_after_seconds)
         self.latest_frame: np.ndarray | None = None
         self.latest_region: np.ndarray | None = None
         self.active_poll_interval = settings.snapshot_interval_seconds
@@ -69,29 +77,57 @@ class Runtime:
         if self.mqtt is not None:
             await self.mqtt.publish()
 
+    def effective_cover_state(self) -> str:
+        """The one place the Home Assistant cover state is decided."""
+        controller = self.controller
+        return get_effective_cover_state(
+            active_target=controller.requested_target if controller is not None else None,
+            confirmed=self.confirmed_state,
+            confirmation_current=self.confirmation_current,
+        ).value
+
+    def update_availability(self) -> bool:
+        """Availability is tracked apart from gate position and only here."""
+        return self.availability.update(
+            camera_online=self.camera.status.online,
+            monitoring_ready=self.classifier.ready,
+        )
+
     def status_payload(self) -> dict[str, Any]:
         controller = self.controller
         camera_time = self.camera.status.last_frame_at
-        if controller is not None and controller.active:
-            cover_state = controller.cover_state(self.confirmed_state)
-        elif (
-            self.latest_observation.position == self.confirmed_state
-            and self.confirmed_state in (GatePosition.OPEN, GatePosition.CLOSED)
-            and not self.latest_observation.is_moving
-        ):
-            cover_state = self.confirmed_state.value
-        else:
-            cover_state = "UNKNOWN"
         operation = controller.operation.payload() if controller is not None else {}
+        active = controller.active if controller is not None else False
+        last_result = controller.operation.result if controller is not None else None
+        vision_state = get_vision_state(
+            latest=self.latest_observation,
+            confirmed=self.confirmed_state,
+            confirmation_current=self.confirmation_current,
+        )
+        fault_reason = get_fault(
+            available=self.availability.available,
+            availability_reason=self.availability.reason,
+            controller_active=active,
+            vision_state=vision_state,
+            last_result=last_result if last_result is not OperationResult.IN_PROGRESS else None,
+        )
         snapshot_observations: list[dict[str, object]] = []
         # The camera loop stores this compact copy for synchronous MQTT/web access.
         if hasattr(self, "recent_observations"):
             snapshot_observations = [item.payload() for item in self.recent_observations[-6:]]
         return {
-            "cover_state": cover_state,
+            # The Home Assistant cover state. Only open/closed/opening/closing/unknown.
+            "cover_state": self.effective_cover_state(),
+            "available": self.availability.available,
+            "availability_reason": self.availability.reason,
+            # Diagnostics below. These are never Home Assistant cover states.
+            "vision_state": vision_state.value,
             "confirmed_state": self.confirmed_state.value,
+            "confirmation_current": self.confirmation_current,
             "raw_state": self.latest_observation.position.value,
-            "vision_confidence": round(self.latest_observation.confidence, 4),
+            "confidence": round(self.latest_observation.confidence, 4),
+            "fault": fault_reason is not None,
+            "fault_reason": fault_reason,
             "open_score": round(self.latest_observation.open_score, 4),
             "closed_score": round(self.latest_observation.closed_score, 4),
             "partial_score": round(self.latest_observation.partial_score, 4),
@@ -99,17 +135,13 @@ class Runtime:
             "frame_change": round(self.latest_observation.frame_change, 4),
             "last_camera_frame_time": camera_time.isoformat() if camera_time else None,
             "camera_online": self.camera.status.online,
-            "available": self.camera.status.online and self.classifier.ready,
             "reference_count": self.classifier.count,
             "reference_files": list(self.classifier.reference_files),
-            "current_requested_target": (
-                operation.get("target")
-                if controller is not None and controller.active
-                else None
-            ),
+            "target_state": operation.get("target") if active else None,
+            "current_requested_target": operation.get("target") if active else None,
             "controller_status": operation.get("status", "Idle"),
             "controller_state": operation.get("controller_state", "IDLE"),
-            "controller_active": controller.active if controller is not None else False,
+            "controller_active": active,
             "current_attempt": operation.get("attempt", 0),
             "last_result": operation.get("result"),
             "last_relay_pulse": operation.get("last_relay_pulse"),
@@ -146,6 +178,7 @@ class Runtime:
                 self.latest_region = region
                 self.latest_observation = observation
                 self.confirmed_state = snapshot.confirmed
+                self.confirmation_current = snapshot.confirmation_current
                 self.recent_observations = snapshot.observations
                 frame_completed_at = loop.time()
                 last_sample_at = cycle_started
@@ -163,6 +196,7 @@ class Runtime:
                     LOGGER.warning("Camera offline: %s", exc)
                 was_online = False
 
+            self.update_availability()
             now = loop.time()
             if self.latest_observation.is_moving:
                 fast_until = now + self.settings.moving_poll_hold_seconds
