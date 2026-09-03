@@ -7,6 +7,7 @@ const elements = {
   controllerTarget: document.querySelector("#controller-target"),
   detected: document.querySelector("#detected-state"),
   motion: document.querySelector("#motion"),
+  travel: document.querySelector("#travel"),
   fault: document.querySelector("#fault"),
   message: document.querySelector("#message"),
   buttons: [...document.querySelectorAll("button[data-target]")],
@@ -34,6 +35,10 @@ function render(status) {
   elements.controllerTarget.textContent = status.target_state || "None";
   elements.detected.textContent = status.raw_state || "UNKNOWN";
   elements.motion.textContent = status.is_moving ? "Moving" : "Stationary";
+  elements.travel.textContent =
+    status.travel === null || status.travel === undefined
+      ? "Unknown"
+      : `${Math.round(status.travel * 100)}% open`;
   elements.fault.textContent = status.fault ? status.fault_reason || "Fault" : "None";
   setControlsDisabled(!available || busy);
 

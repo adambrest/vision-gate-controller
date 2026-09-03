@@ -29,6 +29,11 @@ GATE_POLYGON = (
 )
 CLASSIFIER_SIZE = (160, 96)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+# Camera frames are decoded at half size. The polygon is scaled from the frame
+# dimensions, so this only trades detail we discard anyway for CPU and memory.
+DECODE_FLAG = cv2.IMREAD_REDUCED_COLOR_2
+TRAVEL_COLUMNS = 256
+TRAVEL_ROWS = 128
 
 
 def scaled_gate_points(width: int, height: int) -> dict[str, tuple[float, float]]:
@@ -92,14 +97,98 @@ def preprocess(region: np.ndarray) -> np.ndarray:
     return cv2.GaussianBlur(normalized, (3, 3), 0)
 
 
+class GateTravel:
+    """How far the sliding gate has travelled: 0.0 closed, 1.0 fully open.
+
+    Whole-region similarity cannot separate a nearly-open gate from a fully
+    open one. The two frames differ only by a small horizontal shift of the
+    panel's leading edge, inside a region that is otherwise identical driveway,
+    so a global feature is dominated by the parts that do not change. This
+    locates that edge directly, per column, which is the quantity that actually
+    varies as the gate moves.
+    """
+
+    def __init__(self) -> None:
+        self._open: np.ndarray | None = None
+        self._closed: list[np.ndarray] = []
+        self._parked_end = 0
+
+    @property
+    def ready(self) -> bool:
+        return self._open is not None and bool(self._closed)
+
+    @staticmethod
+    def _prepare(region: np.ndarray) -> np.ndarray:
+        resized = cv2.resize(
+            region,
+            (TRAVEL_COLUMNS, TRAVEL_ROWS),
+            interpolation=cv2.INTER_AREA,
+        )
+        gray = resized if resized.ndim == 2 else cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        equalised = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+        return equalised.astype(np.float32)
+
+    @staticmethod
+    def _column_normalise(image: np.ndarray) -> np.ndarray:
+        """Zero-mean unit-norm per column, so brightness cannot shift the edge."""
+        centred = image - image.mean(axis=0, keepdims=True)
+        return centred / (np.linalg.norm(centred, axis=0, keepdims=True) + 1e-6)
+
+    @classmethod
+    def _smooth(cls, values: np.ndarray) -> np.ndarray:
+        return cv2.blur(values.reshape(1, -1), (9, 1)).ravel()
+
+    def calibrate(self, open_regions: list[np.ndarray], closed_regions: list[np.ndarray]) -> None:
+        if not open_regions or not closed_regions:
+            self._open, self._closed, self._parked_end = None, [], 0
+            return
+        self._open = self._column_normalise(
+            np.mean([self._prepare(region) for region in open_regions], axis=0)
+        )
+        self._closed = [
+            self._column_normalise(self._prepare(region)) for region in closed_regions
+        ]
+        # Columns where both endpoints show gate cannot discriminate; the panel
+        # is parked there whether the gate is open or closed.
+        agreement = self._smooth(
+            np.max([(self._open * closed).sum(axis=0) for closed in self._closed], axis=0)
+        )
+        below = np.flatnonzero(agreement < 0.5)
+        self._parked_end = int(below[0]) if below.size else 0
+
+    def measure(self, region: np.ndarray) -> float | None:
+        if self._open is None or not self._closed:
+            return None
+        current = self._column_normalise(self._prepare(region))
+        to_open = (current * self._open).sum(axis=0)
+        to_closed = np.max([(current * closed).sum(axis=0) for closed in self._closed], axis=0)
+        panel = self._smooth(to_closed - to_open) > 0.0
+        edge = self._parked_end
+        for column in range(self._parked_end, TRAVEL_COLUMNS):
+            if panel[max(self._parked_end, column - 4) : column + 1].all():
+                edge = column + 1
+        span = TRAVEL_COLUMNS - self._parked_end
+        if span <= 0:
+            return None
+        return float(np.clip((TRAVEL_COLUMNS - edge) / span, 0.0, 1.0))
+
+
 class ReferenceClassifier:
     """Small HOG/layout matcher that uses every labeled reference file."""
 
     _hog = cv2.HOGDescriptor(CLASSIFIER_SIZE, (16, 16), (8, 8), (8, 8), 9)
 
-    def __init__(self, reference_root: Path, expected_count: int | None = None) -> None:
+    def __init__(
+        self,
+        reference_root: Path,
+        expected_count: int | None = None,
+        *,
+        endpoint_travel_tolerance: float = 0.08,
+    ) -> None:
         self.reference_root = reference_root
         self.expected_count = expected_count
+        self.endpoint_travel_tolerance = endpoint_travel_tolerance
+        self.travel = GateTravel()
         self.features: dict[GatePosition, list[np.ndarray]] = {
             GatePosition.OPEN: [],
             GatePosition.CLOSED: [],
@@ -121,6 +210,10 @@ class ReferenceClassifier:
 
     def reload(self) -> None:
         loaded = {GatePosition.OPEN: [], GatePosition.CLOSED: []}
+        regions: dict[GatePosition, list[np.ndarray]] = {
+            GatePosition.OPEN: [],
+            GatePosition.CLOSED: [],
+        }
         filenames: list[str] = []
         for position in (GatePosition.OPEN, GatePosition.CLOSED):
             directory = self.reference_root / position.value.lower()
@@ -129,13 +222,17 @@ class ReferenceClassifier:
             for path in sorted(directory.iterdir()):
                 if path.suffix.lower() not in IMAGE_EXTENSIONS:
                     continue
-                frame = cv2.imread(str(path), cv2.IMREAD_COLOR)
+                # Decoded exactly like a live frame so calibration matches.
+                frame = cv2.imread(str(path), DECODE_FLAG)
                 if frame is None or frame.size == 0:
                     LOGGER.error("Unreadable reference: %s", path.name)
                     continue
-                loaded[position].append(self._feature(extract_gate_region(frame)))
+                region = extract_gate_region(frame)
+                regions[position].append(region)
+                loaded[position].append(self._feature(region))
                 filenames.append(f"{position.value.lower()}/{path.name}")
         self.features = loaded
+        self.travel.calibrate(regions[GatePosition.OPEN], regions[GatePosition.CLOSED])
         self.reference_files = tuple(filenames)
         self.previous = None
         for filename in self.reference_files:
@@ -205,6 +302,9 @@ class ReferenceClassifier:
             position = GatePosition.PARTIALLY_OPEN
             confidence = partial_score
 
+        travel = self.travel.measure(region)
+        position, confidence = self._apply_travel(position, confidence, travel)
+
         return Observation(
             position,
             confidence,
@@ -214,7 +314,32 @@ class ReferenceClassifier:
             frame_change,
             is_moving,
             timestamp,
+            travel=travel,
         ), region
+
+    def _apply_travel(
+        self,
+        position: GatePosition,
+        confidence: float,
+        travel: float | None,
+    ) -> tuple[GatePosition, float]:
+        """Refuse an endpoint the measured gate travel does not support.
+
+        Region similarity saturates well before the gate finishes travelling, so
+        a gate that has stopped just short of its endpoint scores as a confident
+        OPEN or CLOSED. Travel is measured from the panel's leading edge and can
+        only downgrade a claimed endpoint to PARTIALLY_OPEN; it never invents one.
+        """
+        if travel is None or position not in (GatePosition.OPEN, GatePosition.CLOSED):
+            return position, confidence
+        tolerance = self.endpoint_travel_tolerance
+        distance = 1.0 - travel if position is GatePosition.OPEN else travel
+        if distance <= tolerance:
+            return position, confidence
+        # Confidence stays at or above the controller's 0.70 command threshold so
+        # a gate stranded mid-travel can still be commanded to its target.
+        overshoot = (distance - tolerance) / max(tolerance, 1e-6)
+        return GatePosition.PARTIALLY_OPEN, float(np.clip(0.70 + overshoot * 0.30, 0.70, 1.0))
 
     @classmethod
     def _feature(cls, region: np.ndarray) -> np.ndarray:

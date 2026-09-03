@@ -9,6 +9,7 @@ import pytest
 
 from app.models import GatePosition, Observation
 from app.vision import (
+    DECODE_FLAG,
     ReferenceClassifier,
     RollingVision,
     extract_gate_region,
@@ -55,7 +56,7 @@ def test_exactly_six_references_use_live_transform(tmp_path: Path) -> None:
     root = tmp_path / "references"
     six_references(root)
     classifier = ReferenceClassifier(root)
-    source = cv2.imread(str(root / "open" / "open_0.jpg"))
+    source = cv2.imread(str(root / "open" / "open_0.jpg"), DECODE_FLAG)
     expected = classifier._feature(extract_gate_region(source))
 
     assert classifier.ready is True
@@ -102,3 +103,71 @@ async def test_moving_position_does_not_confirm_endpoint() -> None:
             Observation(GatePosition.OPEN, 0.99, is_moving=True, timestamp=datetime.now(UTC))
         )
     assert snapshot.confirmed == GatePosition.UNKNOWN
+
+
+def real_classifier() -> ReferenceClassifier:
+    return ReferenceClassifier(Path(__file__).resolve().parents[1] / "references")
+
+
+def real_region(kind: str, index: int = 0):
+    root = Path(__file__).resolve().parents[1] / "references" / kind
+    path = sorted(root.glob("*.jpg"))[index]
+    return extract_gate_region(cv2.imread(str(path), DECODE_FLAG))
+
+
+def test_travel_calibrates_from_the_reference_set() -> None:
+    assert real_classifier().travel.ready is True
+
+
+@pytest.mark.parametrize(
+    ("kind", "index", "expected"),
+    [("closed", 0, 0.0), ("closed", 1, 0.0), ("open", 0, 1.0), ("open", 1, 1.0)],
+)
+def test_travel_measures_the_real_endpoints(kind: str, index: int, expected: float) -> None:
+    """Both endpoints must stay exact, including the night closed reference."""
+    travel = real_classifier().travel.measure(real_region(kind, index))
+    assert travel == pytest.approx(expected, abs=0.02)
+
+
+def test_endpoints_are_still_classified_after_the_travel_check() -> None:
+    classifier = real_classifier()
+    for kind, expected in (("closed", GatePosition.CLOSED), ("open", GatePosition.OPEN)):
+        for index in (0, 1):
+            root = Path(__file__).resolve().parents[1] / "references" / kind
+            frame = cv2.imread(str(sorted(root.glob("*.jpg"))[index]), DECODE_FLAG)
+            classifier.previous = None
+            observation, _ = classifier.observe(
+                frame, sample_interval_seconds=1.0, timestamp=datetime.now(UTC)
+            )
+            assert observation.position is expected
+            assert observation.confidence >= 0.80
+
+
+def test_gate_short_of_its_endpoint_is_not_reported_as_open() -> None:
+    """The regression: region similarity called a nearly-open gate OPEN."""
+    classifier = real_classifier()
+    closed, opened = real_region("closed"), real_region("open")
+    width = closed.shape[1]
+    # Slide the panel left, leaving it short of the fully open position.
+    partial = opened.copy()
+    shift = int(round(0.55 * width))
+    partial[:, : width - shift] = closed[:, shift:]
+
+    travel = classifier.travel.measure(partial)
+    assert travel is not None and travel < 0.92
+    position, confidence = classifier._apply_travel(GatePosition.OPEN, 0.98, travel)
+    assert position is GatePosition.PARTIALLY_OPEN
+    # Stays commandable so the controller can drive the gate to its target.
+    assert confidence >= 0.70
+
+
+def test_travel_never_invents_an_endpoint() -> None:
+    classifier = real_classifier()
+    for claimed in (GatePosition.PARTIALLY_OPEN, GatePosition.UNKNOWN):
+        position, confidence = classifier._apply_travel(claimed, 0.5, 1.0)
+        assert position is claimed and confidence == 0.5
+
+
+def test_missing_travel_calibration_leaves_the_verdict_untouched() -> None:
+    classifier = real_classifier()
+    assert classifier._apply_travel(GatePosition.OPEN, 0.91, None) == (GatePosition.OPEN, 0.91)

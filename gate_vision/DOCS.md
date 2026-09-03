@@ -57,6 +57,19 @@ withdrawn.
 
 The Ingress panel is always available. It displays the current frame, fixed polygon, perspective-corrected gate region, classifier values, rolling observations, reference filenames, controller state, attempts, results, and the same GateController command path used by `cover.main_gate`. The Home Assistant cover state is shown separately from the richer internal vision and controller states.
 
+## Gate travel and endpoint strictness
+
+The app measures how far the gate has travelled, from 0.0 (closed) to 1.0
+(fully open), and refuses to report OPEN or CLOSED unless the gate is within
+`endpoint_travel_tolerance` (default 0.08) of that endpoint. A gate stopped
+short reports `PARTIALLY_OPEN`, which surfaces as cover state `unknown` with
+`fault_reason: gate_stopped_mid_travel`, and remains commandable so it can be
+driven to its target.
+
+Raise `endpoint_travel_tolerance` if a fully open gate is reported as partial;
+lower it to be stricter. Measured travel is shown on the Ingress debug page and
+published as the `travel` attribute.
+
 ## Safety behavior
 
 - Startup never pulses the relay.

@@ -73,6 +73,7 @@ class Observation:
     frame_change: float = 0.0
     is_moving: bool = False
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    travel: float | None = None
 
     def payload(self) -> dict[str, object]:
         payload = asdict(self)

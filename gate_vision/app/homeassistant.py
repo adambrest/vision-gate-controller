@@ -9,6 +9,8 @@ import cv2
 import httpx
 import numpy as np
 
+from app.vision import DECODE_FLAG
+
 
 CORE_API = "http://supervisor/core/api"
 
@@ -50,7 +52,9 @@ class HomeAssistantClient:
         )
         response.raise_for_status()
         encoded = np.frombuffer(response.content, dtype=np.uint8)
-        frame = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+        # Half-size decode: a quarter of the pixels, and the gate polygon is
+        # scaled from the frame dimensions so geometry is unaffected.
+        frame = cv2.imdecode(encoded, DECODE_FLAG)
         if frame is None or frame.size == 0:
             raise ValueError("Home Assistant camera response is not a valid image")
         return frame

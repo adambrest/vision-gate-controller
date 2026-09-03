@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 
 from app.camera import Camera
@@ -126,6 +127,11 @@ class Runtime:
             "confirmation_current": self.confirmation_current,
             "raw_state": self.latest_observation.position.value,
             "confidence": round(self.latest_observation.confidence, 4),
+            "travel": (
+                round(self.latest_observation.travel, 4)
+                if self.latest_observation.travel is not None
+                else None
+            ),
             "fault": fault_reason is not None,
             "fault_reason": fault_reason,
             "open_score": round(self.latest_observation.open_score, 4),
@@ -248,7 +254,10 @@ async def run() -> None:
     settings = Settings.from_options()
     home_assistant = HomeAssistantClient(settings.camera_entity, settings.gate_script)
     camera = Camera(home_assistant)
-    classifier = ReferenceClassifier(Path("/app/references"))
+    classifier = ReferenceClassifier(
+        Path("/app/references"),
+        endpoint_travel_tolerance=settings.endpoint_travel_tolerance,
+    )
     vision = RollingVision(settings.confirmation_window, settings.confirmation_required)
     runtime = Runtime(settings, camera, classifier, vision)
     mqtt = MqttCover(runtime.status_payload)
@@ -282,6 +291,9 @@ async def run() -> None:
 
 
 def main() -> None:
+    # OpenCV defaults to one thread per core and thrashes on a four-core box for
+    # frames this small. Two threads measurably lowers CPU at the same frame rate.
+    cv2.setNumThreads(2)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

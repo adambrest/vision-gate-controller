@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.8
+
+- Fix a state error where a gate stopped short of its endpoint was reported as
+  fully OPEN. Region similarity saturates long before travel completes: a gate
+  at 82% travel scored OPEN at 0.94 confidence, and the gap between 90% and
+  100% travel was about 0.01 - far inside day/night variation, so no threshold
+  could separate them.
+- Add `GateTravel`, which measures the panel's leading edge per column and
+  reports travel from 0.0 (closed) to 1.0 (fully open). Both endpoints of the
+  existing reference set, including the night frame, measure exactly 0% and 100%.
+- Use travel to veto a claimed endpoint that travel does not support. It can
+  only downgrade OPEN or CLOSED to PARTIALLY_OPEN and never invents an endpoint.
+  Confidence stays at or above 0.70 so a stranded gate remains commandable and
+  the existing partial-stall recovery pulse can now actually engage.
+- Add `endpoint_travel_tolerance` (default 0.08) to tune endpoint strictness.
+- Decode camera frames at half size: 6.2 MB per frame down to 1.6 MB, and about
+  28% less CPU per frame. The gate polygon scales from the frame dimensions, so
+  geometry is unaffected.
+- Cap OpenCV at two threads; it defaulted to one per core and thrashed.
+- Show measured gate travel on the debug page.
+
 ## 1.1.7
 
 - Remove all Home Assistant icon-selection logic. The app no longer publishes an

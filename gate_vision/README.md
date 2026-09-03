@@ -86,6 +86,34 @@ An operation has at most three pulses total: the initial pulse and no more than 
 - Unknown or inconsistent camera evidence never authorizes a retry.
 - A third unsuccessful attempt ends as `FAILED_AFTER_3_ATTEMPTS`; attempt four cannot occur.
 
+## Gate travel
+
+Region similarity alone cannot separate a nearly-open gate from a fully open
+one. The frames differ only by a small horizontal shift of the panel's leading
+edge inside a region that is otherwise identical driveway, so a global feature
+is dominated by the parts that do not change. Measured on this camera, a gate at
+82% travel scored OPEN at 0.94 confidence.
+
+`GateTravel` measures the leading edge directly, column by column, against the
+reference set, and reports travel from 0.0 (closed) to 1.0 (fully open).
+Columns are normalised individually so brightness cannot move the edge; both
+endpoints of the current reference set, including the night frame, measure
+exactly 0% and 100%.
+
+Travel then vetoes any endpoint it does not support: a claimed OPEN or CLOSED
+more than `endpoint_travel_tolerance` (default 0.08) away from its endpoint is
+downgraded to `PARTIALLY_OPEN`. The veto can only downgrade an endpoint, never
+invent one. Downgraded confidence stays at or above 0.70, so the gate remains
+commandable and the bounded recovery below can drive it to its target.
+
+## Runtime cost
+
+Camera frames are decoded at half size, which cuts a 1920x1080 frame from
+6.2 MB to 1.6 MB and about 28% of the per-frame CPU. The gate polygon is scaled
+from the frame dimensions, so decoding smaller changes no geometry. OpenCV is
+capped at two threads because it otherwise starts one per core and thrashes on
+frames this small.
+
 ## References
 
 Every supported image file beneath `references/open` and `references/closed` is enumerated, logged by filename, transformed through the same pipeline, and used. There is no filename allowlist or maximum count. The classifier becomes operational when at least one valid OPEN and one valid CLOSED image exist.
