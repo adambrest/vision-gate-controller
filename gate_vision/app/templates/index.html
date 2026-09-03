@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gate Vision</title>
+    <link rel="stylesheet" href="./static/style.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">Gate Vision</p>
+          <h1>Main gate</h1>
+        </div>
+        <span id="availability" class="badge offline">Unavailable</span>
+      </header>
+
+      <section class="camera-card" aria-labelledby="camera-title">
+        <div class="section-heading">
+          <h2 id="camera-title">Camera</h2>
+          <span id="camera-status">Waiting for frame</span>
+        </div>
+        <div class="frame-wrap">
+          <img id="camera-frame" alt="Latest main gate camera frame">
+        </div>
+      </section>
+
+      <section class="status-grid" aria-label="Gate status">
+        <article>
+          <span>Detected state</span>
+          <strong id="detected-state">UNKNOWN</strong>
+        </article>
+        <article>
+          <span>Motion</span>
+          <strong id="motion">Unknown</strong>
+        </article>
+        <article>
+          <span>Queued action</span>
+          <strong id="queued-action">None</strong>
+        </article>
+      </section>
+
+      <section class="controls" aria-label="Gate controls">
+        <button id="open-button" type="button" data-target="OPEN">Open gate</button>
+        <button id="close-button" type="button" data-target="CLOSED">Close gate</button>
+      </section>
+      <p id="message" role="status" aria-live="polite"></p>
+    </main>
+    <script src="./static/app.js" defer></script>
+  </body>
+</html>
