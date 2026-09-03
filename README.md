@@ -1,10 +1,10 @@
-# Gate Vision — Home Assistant App Repository
+# Vision Gate Controller — Home Assistant App Repository
 
-This repository distributes **Gate Vision**, a camera-verified controller for a
+This repository distributes **Vision Gate Controller**, a camera-verified controller for a
 Home Assistant gate. It publishes `cover.main_gate` through MQTT Discovery and
 provides an Ingress dashboard for status and control.
 
-[![Open your Home Assistant instance and add this app repository.](https://my.home-assistant.io/badges/supervisor_store.svg)](https://my.home-assistant.io/redirect/supervisor_store/?repository_url=https%3A%2F%2Fgithub.com%2Fadambrest%2Fhome-assistant-gate-vision)
+[![Open your Home Assistant instance and add this app repository.](https://my.home-assistant.io/badges/supervisor_store.svg)](https://my.home-assistant.io/redirect/supervisor_store/?repository_url=https%3A%2F%2Fgithub.com%2Fadambrest%2Fvision-gate-controller)
 
 ## Install
 
@@ -14,20 +14,20 @@ provides an Ingress dashboard for status and control.
    repository menu, and add:
 
    ```text
-   https://github.com/adambrest/home-assistant-gate-vision
+   https://github.com/adambrest/vision-gate-controller
    ```
 
-3. Find **Gate Vision** in the app store and select **Install**.
+3. Find **Vision Gate Controller** in the app store and select **Install**.
 4. Review its configuration, start it, and enable **Show in sidebar** if wanted.
 5. Wait for three valid camera confirmations. MQTT Discovery will then create
    `cover.main_gate` with device class `gate`.
 
-See the [Gate Vision documentation](./gate_vision/DOCS.md) for prerequisites,
+See the [Vision Gate Controller documentation](./gate_vision/DOCS.md) for prerequisites,
 configuration, operation, and safety behavior.
 
 ## Apps
 
-### [Gate Vision](./gate_vision)
+### [Vision Gate Controller](./gate_vision)
 
 ![Supports aarch64 architecture](https://img.shields.io/badge/aarch64-yes-green.svg)
 

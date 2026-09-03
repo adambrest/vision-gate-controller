@@ -1,2 +1,1 @@
-"""Gate Vision Home Assistant App."""
-
+"""Vision Gate Controller Home Assistant app."""

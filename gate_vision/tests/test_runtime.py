@@ -4,7 +4,12 @@ import numpy as np
 import pytest
 
 from app.config import Settings
-from app.mqtt_cover import ALERT_ICON, DISCOVERY_TOPIC, MqttCover
+from app.mqtt_cover import (
+    ALERT_ICON,
+    DISCOVERY_TOPIC,
+    ICON_SWITCH_DELAY_SECONDS,
+    MqttCover,
+)
 from app.web import _with_polygon
 
 
@@ -97,6 +102,91 @@ async def test_mqtt_discovery_is_updated_only_when_icon_changes() -> None:
     assert len(discovery_messages) == 2
     assert '"icon": "mdi:boom-gate"' in discovery_messages[0]
     assert '"icon": "mdi:boom-gate-arrow-up"' in discovery_messages[1]
+
+
+@pytest.mark.asyncio
+async def test_direction_icon_is_held_through_brief_vision_hiccups() -> None:
+    class Clock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    class Client:
+        def __init__(self) -> None:
+            self.messages: list[tuple[str, str]] = []
+
+        def publish(self, topic: str, payload: str, **kwargs: object) -> None:
+            self.messages.append((topic, payload))
+
+    clock = Clock()
+    status = {"available": True, "cover_state": "OPEN"}
+    mqtt = MqttCover(lambda: status, clock=clock)
+    client = Client()
+    mqtt._client = client
+
+    await mqtt.publish()
+    status["cover_state"] = "CLOSING"
+    await mqtt.publish()
+
+    for elapsed, outlier in ((0.5, "CLOSED"), (1.0, "OPEN"), (1.5, "UNKNOWN")):
+        clock.now = elapsed
+        status["cover_state"] = outlier
+        await mqtt.publish()
+
+    discovery_messages = [
+        payload for topic, payload in client.messages if topic == DISCOVERY_TOPIC
+    ]
+    assert len(discovery_messages) == 2
+    assert '"icon": "mdi:boom-gate-arrow-down"' in discovery_messages[-1]
+
+    clock.now += ICON_SWITCH_DELAY_SECONDS - 0.1
+    await mqtt.publish()
+    assert len(
+        [payload for topic, payload in client.messages if topic == DISCOVERY_TOPIC]
+    ) == 2
+
+    clock.now += 0.1
+    await mqtt.publish()
+    discovery_messages = [
+        payload for topic, payload in client.messages if topic == DISCOVERY_TOPIC
+    ]
+    assert len(discovery_messages) == 3
+    assert f'"icon": "{ALERT_ICON}"' in discovery_messages[-1]
+
+
+@pytest.mark.asyncio
+async def test_terminal_icon_requires_a_stable_buffer_after_closing() -> None:
+    class Clock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    class Client:
+        def __init__(self) -> None:
+            self.messages: list[tuple[str, str]] = []
+
+        def publish(self, topic: str, payload: str, **kwargs: object) -> None:
+            self.messages.append((topic, payload))
+
+    clock = Clock()
+    status = {"available": True, "cover_state": "CLOSING"}
+    mqtt = MqttCover(lambda: status, clock=clock)
+    client = Client()
+    mqtt._client = client
+
+    await mqtt.publish()
+    status["cover_state"] = "CLOSED"
+    await mqtt.publish()
+    clock.now = ICON_SWITCH_DELAY_SECONDS
+    await mqtt.publish()
+
+    discovery_messages = [
+        payload for topic, payload in client.messages if topic == DISCOVERY_TOPIC
+    ]
+    assert len(discovery_messages) == 2
+    assert '"icon": "mdi:boom-gate"' in discovery_messages[-1]
 
 
 def test_web_frame_draws_fixed_polygon() -> None:

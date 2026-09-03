@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -19,6 +20,11 @@ ATTRIBUTES_TOPIC = "gate_vision/main_gate/attributes"
 AVAILABILITY_TOPIC = "gate_vision/status"
 
 ALERT_ICON = "mdi:boom-gate-alert"
+ICON_SWITCH_DELAY_SECONDS = 3.0
+DIRECTION_ICONS = {
+    "mdi:boom-gate-arrow-down",
+    "mdi:boom-gate-arrow-up",
+}
 STATE_ICONS = {
     "CLOSED": "mdi:boom-gate",
     "OPEN": "mdi:boom-gate-up",
@@ -33,13 +39,22 @@ STATE_ICONS = {
 class MqttCover:
     """MQTT Discovery bridge for the single production cover entity."""
 
-    def __init__(self, status_provider: Callable[[], dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        status_provider: Callable[[], dict[str, Any]],
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.status_provider = status_provider
+        self._clock = clock
         self.controller: GateController | None = None
         self._client: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connected: asyncio.Event | None = None
         self._published_icon: str | None = None
+        self._display_icon: str | None = None
+        self._pending_icon: str | None = None
+        self._pending_icon_since: float | None = None
 
     def set_controller(self, controller: GateController) -> None:
         self.controller = controller
@@ -82,7 +97,7 @@ class MqttCover:
             return
         client.subscribe(COMMAND_TOPIC, qos=1)
         status = self.status_provider()
-        icon = self.icon_for_status(status)
+        icon = self._buffered_icon(status)
         self._publish_discovery(client, icon)
         availability = "online" if status.get("available") else "offline"
         client.publish(AVAILABILITY_TOPIC, availability, qos=1, retain=True)
@@ -115,7 +130,7 @@ class MqttCover:
         status = self.status_provider()
         availability = "online" if status.get("available") else "offline"
         state = status["cover_state"] if status["cover_state"] != "UNKNOWN" else "None"
-        icon = self.icon_for_status(status)
+        icon = self._buffered_icon(status)
         if icon != self._published_icon:
             self._publish_discovery(self._client, icon)
         self._client.publish(AVAILABILITY_TOPIC, availability, qos=1, retain=True)
@@ -135,6 +150,9 @@ class MqttCover:
         self._client.loop_stop()
         self._client = None
         self._published_icon = None
+        self._display_icon = None
+        self._pending_icon = None
+        self._pending_icon_since = None
 
     def _publish_discovery(self, client: Any, icon: str) -> None:
         client.publish(
@@ -150,6 +168,35 @@ class MqttCover:
         if not status.get("available"):
             return ALERT_ICON
         return STATE_ICONS.get(str(status.get("cover_state", "UNKNOWN")), ALERT_ICON)
+
+    def _buffered_icon(self, status: dict[str, Any]) -> str:
+        """Hold the current icon until a new non-direction state is stable."""
+        candidate = self.icon_for_status(status)
+        now = self._clock()
+
+        if self._display_icon is None or candidate in DIRECTION_ICONS:
+            self._display_icon = candidate
+            self._pending_icon = None
+            self._pending_icon_since = None
+            return candidate
+
+        if candidate == self._display_icon:
+            self._pending_icon = None
+            self._pending_icon_since = None
+            return self._display_icon
+
+        if candidate != self._pending_icon:
+            self._pending_icon = candidate
+            self._pending_icon_since = now
+            return self._display_icon
+
+        assert self._pending_icon_since is not None
+        if now - self._pending_icon_since >= ICON_SWITCH_DELAY_SECONDS:
+            self._display_icon = candidate
+            self._pending_icon = None
+            self._pending_icon_since = None
+
+        return self._display_icon
 
     @staticmethod
     def discovery_payload(icon: str = ALERT_ICON) -> dict[str, Any]:
@@ -175,7 +222,7 @@ class MqttCover:
             "device": {
                 "identifiers": ["gate_vision_main_gate"],
                 "name": "Main Gate",
-                "manufacturer": "Local Gate Vision",
+                "manufacturer": "Vision Gate Controller",
                 "model": "Camera-verified toggle gate",
             },
         }

@@ -1,4 +1,4 @@
-# Gate Vision documentation
+# Vision Gate Controller documentation
 
 ## Prerequisites
 
@@ -10,8 +10,8 @@
 
 1. Open **Settings → Apps → App store**.
 2. Open the repository menu and add
-   `https://github.com/adambrest/home-assistant-gate-vision`.
-3. Find and install **Gate Vision** from the app store.
+   `https://github.com/adambrest/vision-gate-controller`.
+3. Find and install **Vision Gate Controller** from the app store.
 4. Review the Configuration tab, then start the app.
 5. Wait for three valid camera confirmations. MQTT Discovery then creates
    `cover.main_gate` with device class `gate`.
@@ -24,7 +24,7 @@ necessary.
 ## Update
 
 New versions appear in Home Assistant after the repository publishes them. Open
-the Gate Vision app page and select **Update** when one is available. No files
+the Vision Gate Controller app page and select **Update** when one is available. No files
 need to be copied into `/addons` and no local rebuild is required.
 
 ## Web interface

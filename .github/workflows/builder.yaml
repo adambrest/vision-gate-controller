@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build-app:
-    name: Build Gate Vision
+    name: Build Vision Gate Controller
     permissions:
       contents: read
       id-token: write

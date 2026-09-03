@@ -229,7 +229,7 @@ async def run() -> None:
     )
     runtime.attach(controller, mqtt)
     mqtt.set_controller(controller)
-    LOGGER.info("Gate Vision started")
+    LOGGER.info("Vision Gate Controller started")
     await home_assistant.check_connection()
     await mqtt.start()
     await mqtt.publish()
@@ -257,7 +257,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     except Exception:
-        LOGGER.exception("Gate Vision stopped due to a fatal error")
+        LOGGER.exception("Vision Gate Controller stopped due to a fatal error")
         raise
 
 

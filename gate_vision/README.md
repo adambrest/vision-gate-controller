@@ -1,6 +1,6 @@
-# Gate Vision — Home Assistant Yellow
+# Vision Gate Controller — Home Assistant Yellow
 
-Gate Vision is a Home Assistant app that publishes `cover.main_gate` through MQTT Discovery. Camera vision supplies physical state; every command calls `script.main_gate_relay_pulse` through Home Assistant's internal Supervisor/Core proxy and verifies the requested endpoint.
+Vision Gate Controller is a Home Assistant app that publishes `cover.main_gate` through MQTT Discovery. Camera vision supplies physical state; every command calls `script.main_gate_relay_pulse` through Home Assistant's internal Supervisor/Core proxy and verifies the requested endpoint.
 
 ## Runtime
 
@@ -10,6 +10,10 @@ Gate Vision is a Home Assistant app that publishes `cover.main_gate` through MQT
 - Frames are processed in memory and are never accumulated on disk.
 
 Position and motion are independent. For example, the gate can be `PARTIALLY_OPEN` and `MOVING` simultaneously. No command or retry is sent while motion is detected.
+
+The directional OPENING/CLOSING icon is held through brief vision outliers. A
+different terminal or alert icon is shown only after that candidate state has
+remained stable for three seconds.
 
 ## Bounded recovery
 

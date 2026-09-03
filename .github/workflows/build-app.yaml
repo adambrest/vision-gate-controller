@@ -13,7 +13,7 @@ on:
 jobs:
   prepare:
     name: Prepare
-    if: github.repository == 'adambrest/home-assistant-gate-vision'
+    if: github.repository == 'adambrest/vision-gate-controller'
     runs-on: ubuntu-latest
     outputs:
       architectures: ${{ steps.info.outputs.architectures }}

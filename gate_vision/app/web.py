@@ -14,7 +14,7 @@ from app.vision import GATE_POLYGON, REFERENCE_RESOLUTION
 
 
 def create_web_app(runtime: Any) -> FastAPI:
-    app = FastAPI(title="Main Gate")
+    app = FastAPI(title="Vision Gate Controller")
     root = Path(__file__).resolve().parent
     app.mount("/static", StaticFiles(directory=root / "static"), name="static")
 
@@ -77,4 +77,3 @@ def _with_polygon(image: Any) -> Any:
     cv2.addWeighted(annotated, 0.18, image, 0.82, 0, annotated)
     cv2.polylines(annotated, [points], True, (165, 235, 188), 3, cv2.LINE_AA)
     return annotated
-

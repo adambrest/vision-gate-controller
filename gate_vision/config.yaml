@@ -1,8 +1,8 @@
-name: "Gate Vision"
-version: "1.1.3"
+name: "Vision Gate Controller"
+version: "1.1.4"
 slug: "gate_vision"
 description: "Camera-verified main gate controller"
-url: "https://github.com/adambrest/home-assistant-gate-vision/tree/main/gate_vision"
+url: "https://github.com/adambrest/vision-gate-controller/tree/main/gate_vision"
 arch:
   - aarch64
 startup: services
@@ -11,11 +11,11 @@ init: false
 homeassistant_api: true
 ingress: true
 ingress_port: 8080
-panel_title: Gate Vision
+panel_title: Vision Gate Controller
 panel_icon: mdi:boom-gate
 services:
   - mqtt:need
-image: "ghcr.io/adambrest/gate-vision"
+image: "ghcr.io/adambrest/vision-gate-controller"
 options:
   camera_entity: "camera.garage_high_resolution_channel"
   gate_script: "script.main_gate_relay_pulse"
