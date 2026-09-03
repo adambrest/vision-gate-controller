@@ -157,3 +157,20 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.controls button.secondary {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  color: #cbd5f5;
+}
+
+.controls button.secondary:hover:not(:disabled) {
+  border-color: rgba(148, 163, 184, 0.9);
+}
+
+.hint {
+  margin: 0.35rem 0 0;
+  color: #94a3b8;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}

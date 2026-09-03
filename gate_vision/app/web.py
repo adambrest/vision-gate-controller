@@ -46,6 +46,17 @@ def create_web_app(runtime: Any) -> FastAPI:
         runtime.start_request(target, source="web_ui")
         return {"accepted": True}
 
+    @app.post("/api/pulse", status_code=202)
+    async def pulse() -> dict[str, bool]:
+        """Deliberate override: one relay pulse, no target, no verification."""
+        state = runtime.status_payload()
+        if state["is_moving"]:
+            raise HTTPException(status_code=409, detail="Gate is moving; controls are locked")
+        if runtime.controller is not None and runtime.controller.active:
+            raise HTTPException(status_code=409, detail="A gate operation is already active")
+        runtime.start_manual_pulse(source="web_ui")
+        return {"accepted": True}
+
     return app
 
 

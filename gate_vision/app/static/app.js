@@ -11,6 +11,7 @@ const elements = {
   fault: document.querySelector("#fault"),
   message: document.querySelector("#message"),
   buttons: [...document.querySelectorAll("button[data-target]")],
+  pulse: document.querySelector("#pulse-button"),
 };
 
 let lastFrameTime = null;
@@ -21,6 +22,10 @@ function endpoint(path) {
 
 function setControlsDisabled(disabled) {
   for (const button of elements.buttons) button.disabled = disabled;
+}
+
+function setPulseDisabled(disabled) {
+  elements.pulse.disabled = disabled;
 }
 
 function render(status) {
@@ -41,6 +46,8 @@ function render(status) {
       : `${Math.round(status.travel * 100)}% open`;
   elements.fault.textContent = status.fault ? status.fault_reason || "Fault" : "None";
   setControlsDisabled(!available || busy);
+  // The override stays live whenever the gate is not already moving.
+  setPulseDisabled(Boolean(status.is_moving || status.controller_active));
 
   if (status.last_camera_frame_time && status.last_camera_frame_time !== lastFrameTime) {
     lastFrameTime = status.last_camera_frame_time;
@@ -58,6 +65,7 @@ async function refresh() {
     elements.availability.textContent = "Unavailable";
     elements.availability.classList.add("offline");
     setControlsDisabled(true);
+    setPulseDisabled(true);
     elements.message.dataset.error = "connection";
     elements.message.textContent = error.message;
   }
@@ -78,9 +86,26 @@ async function requestGate(target) {
   }
 }
 
+async function sendPulse() {
+  setControlsDisabled(true);
+  setPulseDisabled(true);
+  elements.message.textContent = "Sending relay pulse…";
+  try {
+    const response = await fetch(endpoint("api/pulse"), { method: "POST" });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || `Pulse failed (${response.status})`);
+    elements.message.textContent = "Relay pulse sent; result is not verified";
+  } catch (error) {
+    elements.message.textContent = error.message;
+  } finally {
+    await refresh();
+  }
+}
+
 for (const button of elements.buttons) {
   button.addEventListener("click", () => requestGate(button.dataset.target));
 }
+elements.pulse.addEventListener("click", sendPulse);
 
 refresh();
 window.setInterval(refresh, 250);

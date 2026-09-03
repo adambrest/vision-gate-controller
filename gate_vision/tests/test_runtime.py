@@ -199,3 +199,21 @@ def test_web_frame_draws_fixed_polygon() -> None:
     annotated = _with_polygon(frame)
     assert annotated is not frame
     assert np.count_nonzero(annotated) > 0
+
+
+@pytest.mark.asyncio
+async def test_unchanged_state_is_not_republished() -> None:
+    """A steady gate at 4 Hz should not churn retained topics."""
+    status = {"available": True, "cover_state": "closed"}
+    mqtt = MqttCover(lambda: status)
+    client = Client()
+    mqtt._client = client
+
+    for _ in range(5):
+        await mqtt.publish()
+    assert messages(client, STATE_TOPIC) == ["closed"]
+    assert messages(client, AVAILABILITY_TOPIC) == ["online"]
+
+    status["cover_state"] = "opening"
+    await mqtt.publish()
+    assert messages(client, STATE_TOPIC) == ["closed", "opening"]

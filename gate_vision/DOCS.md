@@ -115,6 +115,14 @@ at which point `endpoint_travel_veto` becomes safe to enable.
 Capture reference and test frames at the camera's full resolution where
 possible. Frames smaller than the live feed calibrate on less detail.
 
+## If the gate state reads unknown
+
+The app reports `unknown` rather than guessing. Use **Send relay pulse (toggle)**
+on the Ingress page to work the gate anyway; it is a plain toggle that does not
+require a known state. Then capture a frame of the condition that confused it,
+add it to `references/open` or `references/closed`, and re-run
+`python -m tools.classify --validate`.
+
 ## Safety behavior## Adjusting the gate polygon
 
 `gate_polygon` sets the corridor the gate leaf sweeps, as four `"x,y"` corners
@@ -155,6 +163,14 @@ at which point `endpoint_travel_veto` becomes safe to enable.
 
 Capture reference and test frames at the camera's full resolution where
 possible. Frames smaller than the live feed calibrate on less detail.
+
+## If the gate state reads unknown
+
+The app reports `unknown` rather than guessing. Use **Send relay pulse (toggle)**
+on the Ingress page to work the gate anyway; it is a plain toggle that does not
+require a known state. Then capture a frame of the condition that confused it,
+add it to `references/open` or `references/closed`, and re-run
+`python -m tools.classify --validate`.
 
 ## Safety behavior
 

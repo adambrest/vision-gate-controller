@@ -75,6 +75,26 @@ refresh or unrelated polling delay is involved.
 Set position, tilt, and stop are deliberately not advertised: the gate is a
 toggle relay verified by camera, and travel cannot be halted on command.
 
+## Stability
+
+Rolling confirmation uses a lower bar to hold a confirmation than to earn one.
+Three frames at 0.80 confidence acquire it; two frames at 0.70 keep it. With a
+single threshold, a stationary gate whose confidence sits near the line flaps
+between its position and `unknown`, which reads as the entity misbehaving.
+Motion is the one exception and drops the confirmation immediately, since a
+moving gate really is changing position.
+
+The entity reports `unknown` rather than guessing. That is deliberate: a wrong
+confident state is worse than an honest absent one.
+
+## Working the gate by hand
+
+Camera verification can leave the gate state unknown, and every verified command
+is refused in that case. The Ingress page therefore carries a plain relay pulse
+that works regardless of gate state. It is a bare toggle: it claims no target,
+verifies no result, and is not treated as a fault. It still refuses to fire
+while the gate is moving, and while another operation is running.
+
 ## Bounded recovery
 
 An operation has at most three pulses total: the initial pulse and no more than two retries.

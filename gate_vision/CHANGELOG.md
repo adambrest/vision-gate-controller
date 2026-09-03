@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0
+
+Tuned for a stable week of real use: steady when it is sure, `unknown` when it
+is not, and always operable by hand.
+
+- Add hysteresis to rolling confirmation. A confirmation is acquired on three
+  strong frames and held while two frames still merely agree, so a stationary
+  gate whose confidence wobbles across the threshold no longer flaps between its
+  position and `unknown`. Motion is the exception and drops it at once, because
+  a moving gate is genuinely changing position.
+- Add a manual relay pulse. Camera verification can leave the state unknown, and
+  refusing every command then left no way to work the gate. The Ingress page now
+  has a clearly labelled toggle that works regardless of gate state, claims no
+  target and verifies nothing. It still refuses to fire while the gate is
+  moving, and it is not recorded as a fault.
+- Publish retained MQTT topics only when they change, so a steady gate no longer
+  rewrites state and availability several times a second.
+
 ## 1.1.14
 
 - Add `python -m tools.classify --validate`, which scores the reference set and

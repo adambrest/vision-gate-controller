@@ -484,9 +484,30 @@ class VisionSnapshot:
 
 
 class RollingVision:
-    def __init__(self, window: int = 4, required: int = 3, history: int = 256) -> None:
+    """Rolling confirmation with hysteresis.
+
+    Acquiring a confirmation is deliberately strict; holding one is not. Using
+    the same bar for both makes the state flap whenever confidence sits near the
+    threshold, which reads as the entity spazzing between a position and
+    `unknown`. A confirmation is therefore acquired on `required` strong frames
+    and held while `hold_required` frames still merely agree.
+    """
+
+    def __init__(
+        self,
+        window: int = 4,
+        required: int = 3,
+        history: int = 256,
+        *,
+        acquire_confidence: float = 0.80,
+        hold_confidence: float = 0.70,
+        hold_required: int = 2,
+    ) -> None:
         self.window = window
         self.required = required
+        self.acquire_confidence = acquire_confidence
+        self.hold_confidence = hold_confidence
+        self.hold_required = min(hold_required, required)
         self._observations: deque[Observation] = deque(maxlen=max(6, history))
         self._confirmed = GatePosition.UNKNOWN
         self._current = False
@@ -498,15 +519,18 @@ class RollingVision:
             self._observations.append(observation)
             recent = tuple(self._observations)[-self.window :]
             for position in (GatePosition.OPEN, GatePosition.CLOSED):
-                if self._support(position, recent) >= self.required:
+                if self._support(position, recent, self.acquire_confidence) >= self.required:
                     self._confirmed = position
                     break
             # A confirmation the rolling window no longer supports is stale, so
-            # the gate state it implies must not be reported indefinitely.
+            # the gate state it implies must not be reported indefinitely. The
+            # bar to keep one is lower than the bar to earn it.
             self._current = self._confirmed in (
                 GatePosition.OPEN,
                 GatePosition.CLOSED,
-            ) and self._support(self._confirmed, recent) >= self.required
+            ) and not observation.is_moving and self._support(
+                self._confirmed, recent, self.hold_confidence
+            ) >= self.hold_required
             self._version += 1
             snapshot = self._snapshot()
             self._condition.notify_all()
@@ -525,9 +549,15 @@ class RollingVision:
             return self._snapshot()
 
     @staticmethod
-    def _support(position: GatePosition, recent: tuple[Observation, ...]) -> int:
+    def _support(
+        position: GatePosition,
+        recent: tuple[Observation, ...],
+        minimum_confidence: float,
+    ) -> int:
         return sum(
-            item.position == position and item.confidence >= 0.80 and not item.is_moving
+            item.position == position
+            and item.confidence >= minimum_confidence
+            and not item.is_moving
             for item in recent
         )
 

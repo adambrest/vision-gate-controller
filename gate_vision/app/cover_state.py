@@ -28,6 +28,8 @@ FAULT_REASONS: dict[OperationResult, str] = {
     OperationResult.GATE_MOVING: "gate_moving_when_commanded",
     OperationResult.STATE_UNKNOWN: "gate_state_unknown_when_commanded",
 }
+# A manual pulse is a deliberate override, not a fault.
+NON_FAULT_RESULTS = {OperationResult.MANUAL_PULSE_SENT, OperationResult.ALREADY_AT_TARGET}
 
 
 def get_effective_cover_state(
@@ -92,7 +94,9 @@ def get_fault(
     if vision_state in (VisionState.OPEN, VisionState.CLOSED):
         # The gate reached a confident endpoint, so an older failure is spent.
         return None
-    return FAULT_REASONS.get(last_result) if last_result is not None else None
+    if last_result is None or last_result in NON_FAULT_RESULTS:
+        return None
+    return FAULT_REASONS.get(last_result)
 
 
 @dataclass(slots=True)

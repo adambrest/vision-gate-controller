@@ -180,6 +180,10 @@ async def test_stale_confirmation_is_not_reused_indefinitely() -> None:
     harness = Harness()
     await harness.see(GatePosition.CLOSED, 3)
     assert harness.state() == "closed"
+    # Hysteresis holds the confirmation through a brief wobble ...
+    await harness.see(GatePosition.UNKNOWN, 2)
+    assert harness.state() == "closed"
+    # ... but not once the window no longer supports it at all.
     await harness.see(GatePosition.UNKNOWN, 2)
     assert harness.confirmed is GatePosition.CLOSED
     assert harness.state() == "unknown"
@@ -368,3 +372,37 @@ async def test_sustained_camera_failure_then_recovery_through_the_status_payload
     assert payload["available"] is True
     assert payload["cover_state"] == "closed"
     assert payload["fault"] is False
+
+
+@pytest.mark.asyncio
+async def test_confirmation_survives_a_single_low_confidence_frame() -> None:
+    """Using one threshold for both acquiring and holding makes the state flap."""
+    harness = Harness()
+    await harness.see(GatePosition.CLOSED, 3)
+    assert harness.state() == "closed"
+    await harness.see(GatePosition.CLOSED, 1, confidence=0.72)
+    assert harness.state() == "closed"
+
+
+@pytest.mark.asyncio
+async def test_motion_drops_the_confirmation_immediately() -> None:
+    """A moving gate is changing position, which is not a confidence wobble."""
+    harness = Harness()
+    await harness.see(GatePosition.CLOSED, 3)
+    assert harness.state() == "closed"
+    await harness.see(GatePosition.CLOSED, 1, moving=True)
+    assert harness.state() == "unknown"
+
+
+def test_a_manual_pulse_is_not_a_fault() -> None:
+    """The override is a deliberate action, not something that went wrong."""
+    assert (
+        get_fault(
+            available=True,
+            availability_reason=None,
+            controller_active=False,
+            vision_state=VisionState.UNKNOWN,
+            last_result=OperationResult.MANUAL_PULSE_SENT,
+        )
+        is None
+    )

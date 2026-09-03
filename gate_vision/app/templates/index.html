@@ -60,7 +60,10 @@
       <section class="controls" aria-label="Gate controls">
         <button id="open-button" type="button" data-target="OPEN">Open gate</button>
         <button id="close-button" type="button" data-target="CLOSED">Close gate</button>
+        <button id="pulse-button" type="button" class="secondary">Send relay pulse (toggle)</button>
       </section>
+      <p class="hint">The relay pulse is a plain toggle. It works when the gate
+        state is unknown, and it does not verify the result.</p>
       <p id="message" role="status" aria-live="polite"></p>
     </main>
     <script src="./static/app.js" defer></script>

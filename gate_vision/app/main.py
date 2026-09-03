@@ -61,7 +61,14 @@ class Runtime:
 
     def start_request(self, target: GateTarget, *, source: str) -> None:
         assert self.controller is not None
-        task = asyncio.create_task(self.controller.request_state(target, source=source))
+        self._track(self.controller.request_state(target, source=source))
+
+    def start_manual_pulse(self, *, source: str) -> None:
+        assert self.controller is not None
+        self._track(self.controller.manual_pulse(source=source))
+
+    def _track(self, coroutine: Any) -> None:
+        task = asyncio.create_task(coroutine)
         self._request_tasks.add(task)
         task.add_done_callback(self._request_done)
 

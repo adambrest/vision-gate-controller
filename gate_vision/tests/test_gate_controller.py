@@ -237,3 +237,39 @@ def test_restart_constructs_idle_controller() -> None:
     assert gate.active is False
     assert gate.operation.state.value == "IDLE"
     assert gate.operation.attempt == 0
+
+
+@pytest.mark.asyncio
+async def test_manual_pulse_works_when_the_gate_state_is_unknown() -> None:
+    """Refusing every command on unknown state leaves no way to work the gate."""
+    vision, relay = RollingVision(), FakeRelay()
+    gate = controller(relay, vision)
+    assert await gate.request_state(GateTarget.OPEN) == OperationResult.STATE_UNKNOWN
+    assert not relay.pulses
+
+    assert await gate.manual_pulse(source="web_ui") == OperationResult.MANUAL_PULSE_SENT
+    assert len(relay.pulses) == 1
+    assert gate.operation.target is None      # a bare toggle claims no target
+    assert gate.active is False
+
+
+@pytest.mark.asyncio
+async def test_manual_pulse_still_refuses_while_the_gate_is_moving() -> None:
+    vision, relay = RollingVision(), FakeRelay()
+    await vision.add(Observation(GatePosition.PARTIALLY_OPEN, 0.9, is_moving=True))
+    gate = controller(relay, vision)
+    assert await gate.manual_pulse() == OperationResult.GATE_MOVING
+    assert not relay.pulses
+
+
+@pytest.mark.asyncio
+async def test_manual_pulse_is_rejected_while_another_operation_runs() -> None:
+    vision, relay = RollingVision(), FakeRelay()
+    await add(vision, GatePosition.CLOSED, 3)
+    gate = controller(relay, vision)
+    first = asyncio.create_task(gate.request_state(GateTarget.OPEN))
+    await wait_for_pulses(relay, 1)
+    with pytest.raises(OperationInProgressError):
+        await gate.manual_pulse()
+    first.cancel()
+    await asyncio.gather(first, return_exceptions=True)

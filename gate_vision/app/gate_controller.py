@@ -102,6 +102,54 @@ class GateController:
             self._lock.release()
             await self._notify()
 
+    async def manual_pulse(self, *, source: str = "web_ui") -> OperationResult:
+        """Send one relay pulse without requiring a known gate state.
+
+        Camera verification can leave the gate state unknown, and refusing every
+        command in that case leaves no way to work the gate at all. This is the
+        deliberate human override: it is a bare toggle, so it does not claim a
+        target or verify one, and it still refuses to fire while the gate is
+        moving.
+        """
+        if self._lock.locked():
+            raise OperationInProgressError("A gate operation is already in progress")
+        await self._lock.acquire()
+        self.operation = Operation(
+            source=source,
+            state=ControllerState.SENDING_COMMAND,
+            result=OperationResult.IN_PROGRESS,
+            max_attempts=1,
+            status="Sending manual relay pulse",
+            started_at=datetime.now(UTC),
+        )
+        self._event(f"Manual relay pulse requested by {source}")
+        try:
+            await self._notify()
+            snapshot = await self.vision.snapshot()
+            if snapshot.latest.is_moving:
+                return await self._finish(
+                    OperationResult.GATE_MOVING,
+                    ControllerState.ABORTED,
+                    "Gate is moving; no pulse sent",
+                )
+            pulse = await self.relay.pulse_gate()
+            self.operation.attempt = 1
+            self.operation.last_relay_pulse = pulse.sent_at
+            if not pulse.success:
+                return await self._finish(
+                    OperationResult.RELAY_FAILED,
+                    ControllerState.FAILED,
+                    pulse.detail or "Home Assistant relay script failed",
+                )
+            return await self._finish(
+                OperationResult.MANUAL_PULSE_SENT,
+                ControllerState.SUCCESS,
+                "Manual pulse sent; gate state is not verified",
+            )
+        finally:
+            self._lock.release()
+            await self._notify()
+
     async def _run(self, target: GateTarget) -> OperationResult:
         snapshot = await self.vision.snapshot()
         if snapshot.latest.is_moving:

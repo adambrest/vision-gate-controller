@@ -61,6 +61,7 @@ class OperationResult(StrEnum):
     RELAY_FAILED = "RELAY_FAILED"
     ABORTED_UNCERTAIN = "ABORTED_UNCERTAIN"
     FAILED_AFTER_3_ATTEMPTS = "FAILED_AFTER_3_ATTEMPTS"
+    MANUAL_PULSE_SENT = "MANUAL_PULSE_SENT"
 
 
 @dataclass(frozen=True, slots=True)

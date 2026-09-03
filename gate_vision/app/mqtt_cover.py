@@ -35,6 +35,8 @@ class MqttCover:
         self._client: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connected: asyncio.Event | None = None
+        self._published_state: str | None = None
+        self._published_availability: str | None = None
 
     def set_controller(self, controller: GateController) -> None:
         self.controller = controller
@@ -77,12 +79,10 @@ class MqttCover:
             return
         client.subscribe(COMMAND_TOPIC, qos=1)
         client.publish(DISCOVERY_TOPIC, json.dumps(self.discovery_payload()), qos=1, retain=True)
-        client.publish(
-            AVAILABILITY_TOPIC,
-            self._availability(self.status_provider()),
-            qos=1,
-            retain=True,
-        )
+        availability = self._availability(self.status_provider())
+        client.publish(AVAILABILITY_TOPIC, availability, qos=1, retain=True)
+        self._published_availability = availability
+        self._published_state = None
         if self._loop is not None and self._connected is not None:
             self._loop.call_soon_threadsafe(self._connected.set)
         LOGGER.info("MQTT cover discovery published")
@@ -110,13 +110,16 @@ class MqttCover:
         if self._client is None:
             return
         status = self.status_provider()
-        self._client.publish(
-            AVAILABILITY_TOPIC,
-            self._availability(status),
-            qos=1,
-            retain=True,
-        )
-        self._client.publish(STATE_TOPIC, self.state_payload(status), qos=1, retain=True)
+        # Retained topics only need writing when they change; a steady gate at
+        # 4 Hz would otherwise churn the broker for no benefit.
+        availability = self._availability(status)
+        if availability != self._published_availability:
+            self._client.publish(AVAILABILITY_TOPIC, availability, qos=1, retain=True)
+            self._published_availability = availability
+        state = self.state_payload(status)
+        if state != self._published_state:
+            self._client.publish(STATE_TOPIC, state, qos=1, retain=True)
+            self._published_state = state
         self._client.publish(
             ATTRIBUTES_TOPIC,
             json.dumps(status, separators=(",", ":")),
@@ -131,6 +134,8 @@ class MqttCover:
         self._client.disconnect()
         self._client.loop_stop()
         self._client = None
+        self._published_state = None
+        self._published_availability = None
 
     @staticmethod
     def state_payload(status: dict[str, Any]) -> str:
