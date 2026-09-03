@@ -112,9 +112,89 @@ def annotate(path: Path, frame: np.ndarray, region: np.ndarray, classifier, out_
     return target
 
 
+def validate(root: Path, settings) -> int:
+    """Score the reference set and say whether the travel veto is safe to enable.
+
+    Every reference-matching method tried so far scores near perfectly when a
+    frame is in its own calibration and collapses when it is held out, because
+    three lighting conditions per class is enough to memorise lighting but not
+    to generalise. Leave-one-out is the honest measure, and the acceptance
+    criterion for turning the veto on.
+    """
+    from app.vision import GateTravel, extract_gate_region
+
+    read = lambda p: extract_gate_region(read_frame(p))
+    opens = sorted((root / "open").glob("*.jpg"))
+    closeds = sorted((root / "closed").glob("*.jpg"))
+    partials = sorted((root / "partial").glob("*.jpg"))
+    if len(opens) < 2 or len(closeds) < 2:
+        print("need at least two open and two closed references to validate")
+        return 2
+    tol = settings.endpoint_travel_tolerance
+    classifier = ReferenceClassifier(
+        root, endpoint_travel_tolerance=tol,
+        endpoint_travel_corroboration=settings.endpoint_travel_corroboration,
+    )
+    print(f"reference set: {len(opens)} open, {len(closeds)} closed, {len(partials)} partial\n")
+
+    confirmed = 0
+    for kind, expected in (("open", GatePosition.OPEN), ("closed", GatePosition.CLOSED)):
+        for path in sorted((root / kind).glob("*.jpg")):
+            classifier.previous = None
+            obs, _ = classifier.observe(
+                read_frame(path), sample_interval_seconds=1.0, timestamp=datetime.now(UTC)
+            )
+            ok = obs.position is expected and obs.confidence >= 0.80
+            confirmed += ok
+            if not ok:
+                print(f"  endpoint not confirmed: {path.stem} -> {obs.position.value} {obs.confidence:.2f}")
+    total_ends = len(opens) + len(closeds)
+    print(f"endpoints confirmed in-set          {confirmed}/{total_ends}")
+
+    print("\nleave-one-out (each frame held out of its own calibration):")
+    fails = {"open": [], "closed": []}
+    for kind, group, other, ok in (
+        ("open", opens, closeds, lambda v: v >= 1.0 - tol),
+        ("closed", closeds, opens, lambda v: v <= tol),
+    ):
+        for held in group:
+            rest = [p for p in group if p != held]
+            travel = GateTravel()
+            if kind == "open":
+                travel.calibrate([read(p) for p in rest], [read(p) for p in other])
+            else:
+                travel.calibrate([read(p) for p in other], [read(p) for p in rest])
+            value = travel.measure(read(held))
+            if not ok(value):
+                fails[kind].append((held.stem, value))
+    for kind, group in (("open", opens), ("closed", closeds)):
+        bad = fails[kind]
+        print(f"  {kind:<7} {len(group) - len(bad)}/{len(group)}"
+              + ("" if not bad else "   failing: " + ", ".join(f"{n} ({v*100:.0f}%)" for n, v in bad)))
+
+    wrong = [p.stem for p in partials
+             if (lambda o: o.position in (GatePosition.OPEN, GatePosition.CLOSED) and o.confidence >= 0.80)(
+                 classifier.observe(read_frame(p), sample_interval_seconds=1.0,
+                                    timestamp=datetime.now(UTC))[0])]
+    print(f"\npartials wrongly read as an endpoint {len(wrong)}/{len(partials)}")
+    for name in wrong:
+        print(f"  {name}")
+
+    clean = not fails["open"] and not fails["closed"]
+    print("\n" + ("-" * 62))
+    if clean and confirmed == total_ends:
+        print("PASS  leave-one-out is clean. endpoint_travel_veto can be enabled.")
+        return 0
+    print("HOLD  leave-one-out still fails, so endpoint_travel_veto must stay off.")
+    print("      Add endpoint references for conditions that fail above, then re-run.")
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("images", nargs="+", help="image files, or directories of them")
+    parser.add_argument("images", nargs="*", help="image files, or directories of them")
+    parser.add_argument("--validate", action="store_true",
+                        help="score the reference set and report whether the travel veto can be enabled")
     parser.add_argument("--references", default="references", help="reference root")
     parser.add_argument("--expect", choices=LABELS, help="assert every image is this state")
     parser.add_argument("--annotate", metavar="DIR", help="write annotated images showing the leading edge")
@@ -134,6 +214,9 @@ def main() -> int:
         f"references: {classifier.count} frames, travel calibrated={classifier.travel.ready}, "
         f"veto={'on' if args.veto else 'off'}, tolerance={settings.endpoint_travel_tolerance}"
     )
+
+    if args.validate:
+        return validate(Path(args.references), settings)
 
     images = collect(args.images)
     if not images:

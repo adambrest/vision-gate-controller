@@ -93,6 +93,7 @@ cases can be checked before trusting them. Run it from the `gate_vision`
 directory:
 
 ```bash
+python -m tools.classify --validate                   # score the reference set
 python -m tools.classify frame.jpg                    # one frame
 python -m tools.classify ~/captures --expect partial   # a labelled folder
 python -m tools.classify frame.jpg --annotate out/     # draw the leading edge
@@ -104,6 +105,12 @@ open/closed/partial scores, and the cover state the frame would produce if it
 persisted. `--annotate` writes an image with the gate polygon drawn on the
 frame and the detected leading edge drawn on the rectified region, which is the
 quickest way to see why a frame was read the way it was.
+
+`--validate` is the acceptance test for the reference set. It holds each
+endpoint frame out of its own calibration and reports whether it is still
+recognised, which is the only honest measure: matching a frame that is in its
+own reference set proves nothing. It prints HOLD until leave-one-out is clean,
+at which point `endpoint_travel_veto` becomes safe to enable.
 
 Capture reference and test frames at the camera's full resolution where
 possible. Frames smaller than the live feed calibrate on less detail.
@@ -127,6 +134,7 @@ cases can be checked before trusting them. Run it from the `gate_vision`
 directory:
 
 ```bash
+python -m tools.classify --validate                   # score the reference set
 python -m tools.classify frame.jpg                    # one frame
 python -m tools.classify ~/captures --expect partial   # a labelled folder
 python -m tools.classify frame.jpg --annotate out/     # draw the leading edge
@@ -138,6 +146,12 @@ open/closed/partial scores, and the cover state the frame would produce if it
 persisted. `--annotate` writes an image with the gate polygon drawn on the
 frame and the detected leading edge drawn on the rectified region, which is the
 quickest way to see why a frame was read the way it was.
+
+`--validate` is the acceptance test for the reference set. It holds each
+endpoint frame out of its own calibration and reports whether it is still
+recognised, which is the only honest measure: matching a frame that is in its
+own reference set proves nothing. It prints HOLD until leave-one-out is clean,
+at which point `endpoint_travel_veto` becomes safe to enable.
 
 Capture reference and test frames at the camera's full resolution where
 possible. Frames smaller than the live feed calibrate on less detail.

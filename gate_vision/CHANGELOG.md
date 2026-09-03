@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.14
+
+- Add `python -m tools.classify --validate`, which scores the reference set and
+  states whether `endpoint_travel_veto` is safe to enable. It reports in-set
+  endpoint confirmation, leave-one-out per class, and which partial frames still
+  read as an endpoint, then prints PASS or HOLD.
+- Leave-one-out is the acceptance criterion because every reference-matching
+  method tried scores near perfectly in-set and collapses when held out. Three
+  lighting conditions per class is enough to memorise lighting, not to
+  generalise. A corridor-clear measure scored 100% on all three open references
+  and 87.9% on the most-open partial, an apparently clean 12-point separation,
+  but held-out `IR-open` scored 61.7% and the separation inverted to -26 points.
+
 ## 1.1.13
 
 - Fix a plainly closed gate reporting `unknown`. Region similarity scores a

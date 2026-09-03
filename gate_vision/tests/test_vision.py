@@ -303,3 +303,11 @@ def test_every_endpoint_reference_reaches_the_confirmation_threshold() -> None:
             )
             assert observation.position is expected, name
             assert observation.confidence >= 0.80, f"{name} scored {observation.confidence}"
+
+
+def test_validate_reports_the_veto_acceptance_criterion() -> None:
+    """The tool must refuse to green-light the veto while leave-one-out fails."""
+    from app.config import Settings as S
+    from tools.classify import validate
+
+    assert validate(REFERENCES, S()) == 1  # 1 = HOLD, leave-one-out still failing
