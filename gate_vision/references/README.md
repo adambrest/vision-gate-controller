@@ -11,10 +11,14 @@ Filenames record the lighting condition and the gate state, for example
 `Night-partial2.jpg`. Keep that convention: the tests and the travel
 calibration both rely on day, IR and night being represented at each endpoint.
 
-Known gap: leave-one-out testing still fails on three closed references, so
+Label carefully. Three frames added in 1.1.11 were labelled as endpoints when
+they were partially open, which corrupted calibration until it was caught.
+When in doubt, put the frame in `partial/`, which is never used for training.
+
+Known gap: leave-one-out testing still fails on one closed reference, so
 lighting outside these conditions is not fully covered. Open references
-generalise cleanly. Adding frames measurably improves this - the last three
-additions took leave-one-out from 3/6 to 6/9 - so keep adding endpoint frames
+generalise cleanly. Adding frames measurably improves this - tightening the gate
+polygon took leave-one-out from 3/6 to 5/6 - so keep adding endpoint frames
 for conditions that misclassify. Check with:
 
     python -m tools.classify path/to/frames --expect closed

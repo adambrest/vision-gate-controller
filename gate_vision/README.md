@@ -100,36 +100,46 @@ IR and night frames of the same scene look nothing alike. The edge is the end
 of the leaf's contiguous run, so a fence post or a parked vehicle further along
 the region cannot pin it.
 
+### The gate travel corridor
+
+`GATE_POINTS` covers only the corridor the leaf sweeps between parked and
+closed. It is derived from what changes between the closed and open references
+in all three lighting conditions, so it excludes the road, the driveway beyond
+the gate and the paving below. The previous polygon reached into the road,
+where passing vehicles, a crane and moving shadows were measured as though they
+were the gate.
+
 ### Measured accuracy
 
-Against the labelled reference set, with the eight partial frames held out of
+Against the labelled reference set, with the eleven partial frames held out of
 calibration:
 
 | | result |
 | --- | --- |
 | Endpoints, in-set | 6/6 exact (open 100%, closed 0%) |
-| Held-out partial frames detected | 5/8 |
+| Endpoints, leave-one-out | 5/6 (open 3/3, closed 2/3) |
+| Held-out partial frames detected | 4/11 |
 | Endpoint frames misread as partial | 0 |
-| Endpoints, leave-one-out | 3/6 |
 
-The three missed partials measure fully open, so they behave exactly as they did
-before travel existed and add no new failure mode. The last row is the important
-one: with a frame held out of its own calibration, all three closed references
-fail, and a daytime closed gate measures fully open. Travel is therefore doing
-lighting-matched nearest-neighbour matching rather than geometry, and it only
-recognises an endpoint whose lighting the references already cover.
+Endpoints are reliable. **Partial position is not solved.** Four approaches
+were measured and rejected:
 
-### Why the veto ships disabled
+| approach | result | why it fails |
+| --- | --- | --- |
+| Whole-region similarity | partial indistinguishable from open | encodes lighting, not gate position |
+| Three-class nearest neighbour | 4/14 | nearest neighbour of a closed frame is a partial frame of the same lighting |
+| Per-column slat texture | 3/14 | at night the far half of the gate is unlit and has no texture |
+| Leading-edge template match | 4/17 | locks onto the fixed end post, present in every frame |
 
-`endpoint_travel_veto` is `false` by default for that reason. Enabled, a
-genuinely closed gate under lighting the references do not cover would be
-downgraded to `PARTIALLY_OPEN`, and because a partial gate stays commandable, a
-CLOSE command would then pulse an already-closed gate back open.
+The per-column reference comparison in use is the best of them, and its limit
+is structural: the leaf has periodic slats, so a translated gate never aligns
+with a closed reference, and correlation collapses. Frames whose slats happen
+to align score as closed; the rest do not.
 
-Travel is still measured on every frame and published as the `travel` attribute
-and on the debug page, so coverage can be judged from real data. Enable the veto
-once the reference set covers more conditions - dusk, rain, headlights - and the
-leave-one-out figure above improves.
+Solving partial position properly needs either substantially more labelled data
+with a learned model, or a limit switch on the gate motor. The camera is
+reliable for the endpoints and for detecting motion, which is what the
+controller depends on.
 
 ## Runtime cost
 

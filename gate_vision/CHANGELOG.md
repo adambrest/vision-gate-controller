@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.12
+
+- Correct three mislabelled frames added in 1.1.11. All three are partially
+  open, not endpoints, and are moved to `references/partial`. The endpoint set
+  is back to three open and three closed frames.
+- Tighten `GATE_POINTS` to the gate travel corridor, derived from what changes
+  between the closed and open references across all three lighting conditions.
+  The old polygon reached into the road, so passing vehicles, the crane and
+  driveway shadows were measured as though they were the gate.
+- Travel leave-one-out improves from 3/6 to 5/6. Open references now generalise
+  with no failures; one closed reference still fails. The veto stays disabled
+  until that reaches zero.
+
 ## 1.1.11
 
 - Add three endpoint references captured at times the set did not cover: an

@@ -45,8 +45,8 @@ def six_references(root: Path) -> None:
 
 def test_polygon_scales_from_reference_resolution() -> None:
     points = scaled_gate_points(640, 360)
-    assert points["top_left"] == (158.5, 134.0)
-    assert points["bottom_right"] == (300.0, 275.0)
+    assert points["top_left"] == pytest.approx((163.15, 148.35))
+    assert points["bottom_right"] == pytest.approx((321.55, 250.1))
 
 
 def test_perspective_transform_returns_image() -> None:
@@ -128,15 +128,15 @@ def test_reference_set_covers_day_ir_and_night() -> None:
         names = labelled(kind)
         for lighting in ("Day", "IR", "Night"):
             assert any(n.startswith(lighting) for n in names), f"{kind} lacks {lighting}"
-    assert len(labelled("open")) == 4
-    assert len(labelled("closed")) == 5
-    assert len(labelled("partial")) == 9
+    assert len(labelled("open")) == 3
+    assert len(labelled("closed")) == 3
+    assert len(labelled("partial")) == 11
 
 
 def test_partial_references_are_not_loaded_as_endpoints() -> None:
     """references/partial holds held-out test data, never classifier input."""
     classifier = real_classifier()
-    assert classifier.count == 9
+    assert classifier.count == 6
     assert all("partial" not in name for name in classifier.reference_files)
 
 
@@ -166,8 +166,9 @@ def test_no_endpoint_reference_is_mistaken_for_a_partial_gate() -> None:
 def test_travel_catches_most_but_not_all_held_out_partials() -> None:
     """Documents real coverage on the eight labelled partial frames.
 
-    Five of nine are detected. The rest measure fully open, so they behave
-    exactly as they did before travel existed - no new failure mode.
+    Four of eleven are detected. The rest measure fully open, so they behave
+    exactly as they did before travel existed - no new failure mode. Partial
+    position is not solved; see the Gate travel section of the README.
     """
     classifier = real_classifier()
     caught = [
@@ -175,7 +176,7 @@ def test_travel_catches_most_but_not_all_held_out_partials() -> None:
         for name in labelled("partial")
         if 0.08 < classifier.travel.measure(real_region("partial", name)) < 0.92
     ]
-    assert len(caught) == 5
+    assert len(caught) == 4
 
 
 def test_endpoint_travel_veto_is_disabled_by_default() -> None:
@@ -217,9 +218,10 @@ def test_travel_generalisation_gap_is_tracked() -> None:
         travel.calibrate([read(p) for p in opens], [read(p) for p in rest])
         if travel.measure(read(held)) > 0.08:
             closed_failures += 1
-    # Open generalises; closed does not. Adding references shrinks this.
+    # Tightening the gate polygon took closed failures from 3 to 1. Open
+    # generalises cleanly. Reconsider the veto when closed reaches 0.
     assert open_failures == 0
-    assert closed_failures == 3, "re-evaluate enabling endpoint_travel_veto"
+    assert closed_failures == 1, "re-evaluate enabling endpoint_travel_veto"
 
 
 def test_missing_travel_calibration_leaves_the_verdict_untouched() -> None:

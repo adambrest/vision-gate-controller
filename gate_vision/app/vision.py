@@ -15,11 +15,16 @@ from app.models import GatePosition, Observation
 
 LOGGER = logging.getLogger(__name__)
 REFERENCE_RESOLUTION = (1280, 720)
+# The gate travel corridor: the area the leaf sweeps between parked and closed.
+# Derived from what changes between the closed and open references in all three
+# lighting conditions, so it excludes the road, the driveway beyond the gate and
+# the paving below - where vehicles, the crane and shadows would otherwise be
+# measured as if they were the gate.
 GATE_POINTS = {
-    "top_left": (317.0, 268.0),
-    "bottom_left": (310.0, 407.0),
-    "top_right": (639.0, 384.0),
-    "bottom_right": (600.0, 550.0),
+    "top_left": (326.3, 296.7),
+    "bottom_left": (320.8, 407.8),
+    "top_right": (616.7, 391.3),
+    "bottom_right": (643.1, 500.2),
 }
 GATE_POLYGON = (
     GATE_POINTS["top_left"],
