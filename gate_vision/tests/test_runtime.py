@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
 from app.config import Settings
 from app.mqtt_cover import (
+    ALERT_ICON,
     AVAILABILITY_TOPIC,
     DISCOVERY_TOPIC,
     MqttCover,
@@ -34,7 +37,11 @@ class Client:
 
 
 def messages(client: Client, topic: str) -> list[str]:
-    return [payload for published_topic, payload in client.messages if published_topic == topic]
+    return [
+        payload
+        for published_topic, payload in client.messages
+        if published_topic == topic
+    ]
 
 
 def test_web_ui_has_no_debug_mode_switch() -> None:
@@ -74,12 +81,33 @@ def test_mqtt_discovery_creates_main_gate_cover() -> None:
     assert payload["object_id"] == "main_gate"
     assert payload["default_entity_id"] == "cover.main_gate"
     assert payload["device_class"] == "gate"
-    assert "icon" not in payload
+    assert payload["icon"] == ALERT_ICON
     assert payload["optimistic"] is False
 
 
+@pytest.mark.parametrize(
+    ("available", "state", "icon"),
+    [
+        (True, "CLOSED", "mdi:boom-gate"),
+        (True, "OPEN", "mdi:boom-gate-up"),
+        (True, "CLOSING", "mdi:boom-gate-arrow-down"),
+        (True, "OPENING", "mdi:boom-gate-arrow-up"),
+        (True, "PARTIAL", ALERT_ICON),
+        (True, "PARTIALLY_OPEN", ALERT_ICON),
+        (True, "UNKNOWN", ALERT_ICON),
+        (False, "OPEN", ALERT_ICON),
+    ],
+)
+def test_main_gate_icon_tracks_trusted_cover_state(
+    available: bool,
+    state: str,
+    icon: str,
+) -> None:
+    assert MqttCover.icon_for_state(state, available=available) == icon
+
+
 @pytest.mark.asyncio
-async def test_mqtt_discovery_is_static_while_state_changes() -> None:
+async def test_mqtt_discovery_icon_changes_with_buffered_state() -> None:
     status = {"available": True, "cover_state": "CLOSED"}
     mqtt = MqttCover(lambda: status)
     client = Client()
@@ -90,8 +118,29 @@ async def test_mqtt_discovery_is_static_while_state_changes() -> None:
     status["cover_state"] = "OPENING"
     await mqtt.publish()
 
-    assert len(messages(client, DISCOVERY_TOPIC)) == 1
+    discovery = [json.loads(payload) for payload in messages(client, DISCOVERY_TOPIC)]
+    assert [payload["icon"] for payload in discovery] == [
+        "mdi:boom-gate",
+        "mdi:boom-gate-arrow-up",
+    ]
     assert messages(client, STATE_TOPIC)[-1] == "OPENING"
+
+
+@pytest.mark.asyncio
+async def test_camera_unavailable_immediately_uses_alert_icon() -> None:
+    clock = Clock()
+    status = {"available": True, "cover_state": "OPEN"}
+    mqtt = MqttCover(lambda: status, clock=clock)
+    client = Client()
+    mqtt._client = client
+
+    await mqtt.publish()
+    status["available"] = False
+    await mqtt.publish()
+
+    discovery = [json.loads(payload) for payload in messages(client, DISCOVERY_TOPIC)]
+    assert discovery[-1]["icon"] == ALERT_ICON
+    assert messages(client, AVAILABILITY_TOPIC)[-1] == "online"
 
 
 @pytest.mark.asyncio

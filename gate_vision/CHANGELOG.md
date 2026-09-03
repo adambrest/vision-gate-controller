@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.6
+
+- Map the standard `cover.main_gate` entity to explicit boom-gate icons for
+  closed, open, closing, and opening states.
+- Use the boom-gate alert icon whenever camera availability or gate state is
+  untrusted.
+
 ## 1.1.5
 
 - Use Home Assistant's native state-aware gate icons instead of repeatedly

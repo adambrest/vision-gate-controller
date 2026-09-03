@@ -19,9 +19,19 @@ STATE_TOPIC = "gate_vision/main_gate/state"
 ATTRIBUTES_TOPIC = "gate_vision/main_gate/attributes"
 AVAILABILITY_TOPIC = "gate_vision/status"
 
+ALERT_ICON = "mdi:boom-gate-alert"
 STATE_SWITCH_DELAY_SECONDS = 3.0
 DIRECTION_STATES = {"CLOSING", "OPENING"}
 VALID_COVER_STATES = {"CLOSED", "CLOSING", "OPEN", "OPENING"}
+STATE_ICONS = {
+    "CLOSED": "mdi:boom-gate",
+    "OPEN": "mdi:boom-gate-up",
+    "CLOSING": "mdi:boom-gate-arrow-down",
+    "OPENING": "mdi:boom-gate-arrow-up",
+    "PARTIAL": ALERT_ICON,
+    "PARTIALLY_OPEN": ALERT_ICON,
+    "UNKNOWN": ALERT_ICON,
+}
 
 
 class MqttCover:
@@ -39,6 +49,7 @@ class MqttCover:
         self._client: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connected: asyncio.Event | None = None
+        self._published_icon: str | None = None
         self._display_state: str | None = None
         self._pending_state: str | None = None
         self._pending_state_since: float | None = None
@@ -86,8 +97,13 @@ class MqttCover:
             return
         client.subscribe(COMMAND_TOPIC, qos=1)
         status = self.status_provider()
-        self._publish_discovery(client)
         availability = self._buffered_availability(status)
+        buffered_state = self._buffered_state(status)
+        icon = self.icon_for_state(
+            buffered_state,
+            available=bool(status.get("available")),
+        )
+        self._publish_discovery(client, icon)
         client.publish(AVAILABILITY_TOPIC, availability, qos=1, retain=True)
         if self._loop is not None and self._connected is not None:
             self._loop.call_soon_threadsafe(self._connected.set)
@@ -119,6 +135,12 @@ class MqttCover:
         availability = self._buffered_availability(status)
         buffered_state = self._buffered_state(status)
         state = buffered_state if buffered_state != "UNKNOWN" else "None"
+        icon = self.icon_for_state(
+            buffered_state,
+            available=bool(status.get("available")),
+        )
+        if icon != self._published_icon:
+            self._publish_discovery(self._client, icon)
         self._client.publish(AVAILABILITY_TOPIC, availability, qos=1, retain=True)
         self._client.publish(STATE_TOPIC, state, qos=1, retain=True)
         self._client.publish(
@@ -135,22 +157,30 @@ class MqttCover:
         self._client.disconnect()
         self._client.loop_stop()
         self._client = None
+        self._published_icon = None
         self._display_state = None
         self._pending_state = None
         self._pending_state_since = None
         self._display_availability = None
         self._offline_pending_since = None
 
-    def _publish_discovery(self, client: Any) -> None:
+    def _publish_discovery(self, client: Any, icon: str) -> None:
         client.publish(
             DISCOVERY_TOPIC,
-            json.dumps(self.discovery_payload()),
+            json.dumps(self.discovery_payload(icon)),
             qos=1,
             retain=True,
         )
+        self._published_icon = icon
+
+    @staticmethod
+    def icon_for_state(state: str, *, available: bool) -> str:
+        if not available:
+            return ALERT_ICON
+        return STATE_ICONS.get(state, ALERT_ICON)
 
     def _buffered_state(self, status: dict[str, Any]) -> str:
-        """Hold cover state so Home Assistant's native gate icon cannot jitter."""
+        """Hold cover state so its dynamic icon cannot jitter."""
         candidate = str(status.get("cover_state", "UNKNOWN"))
         if candidate not in VALID_COVER_STATES:
             candidate = "UNKNOWN"
@@ -203,13 +233,14 @@ class MqttCover:
         return self._display_availability
 
     @staticmethod
-    def discovery_payload() -> dict[str, Any]:
+    def discovery_payload(icon: str = ALERT_ICON) -> dict[str, Any]:
         return {
             "name": "Main Gate",
             "unique_id": "gate_vision_main_gate",
             "object_id": "main_gate",
             "default_entity_id": "cover.main_gate",
             "device_class": "gate",
+            "icon": icon,
             "command_topic": COMMAND_TOPIC,
             "state_topic": STATE_TOPIC,
             "json_attributes_topic": ATTRIBUTES_TOPIC,
