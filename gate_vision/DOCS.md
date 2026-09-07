@@ -1,181 +1,62 @@
-# Vision Gate Controller documentation
+# Runtime behaviour
 
-## Prerequisites
+This app serves my own gate installation on Home Assistant Yellow. The source,
+reference images, and automated image build are kept on GitHub to make personal
+updates and maintenance easier.
 
-1. Confirm `camera.garage_high_resolution_channel` returns current still images.
-2. Confirm manually running `script.main_gate_relay_pulse` produces one momentary gate pulse.
-3. Install and start the official Mosquitto Broker App, then configure the Home Assistant MQTT integration.
+## Home Assistant connection
 
-## Install from GitHub
+The camera is `camera.garage_high_resolution_channel`, and
+`script.main_gate_relay_pulse` produces the momentary relay pulse. Camera and
+relay access use Home Assistant’s internal Supervisor/Core proxy. MQTT Discovery
+provides `cover.main_gate` through the local broker and MQTT integration.
 
-1. Open **Settings → Apps → App store**.
-2. Open the repository menu and add
-   `https://github.com/adambrest/vision-gate-controller`.
-3. Find and install **Vision Gate Controller** from the app store.
-4. Review the Configuration tab, then start the app.
-5. Wait for three valid camera confirmations. MQTT Discovery then creates
-   `cover.main_gate` with device class `gate`.
+The cover supports open and close. It reports `open`, `closed`, `opening`,
+`closing`, or `unknown`; Home Assistant shows `unavailable` when monitoring is
+unavailable. Richer vision, controller, and fault information appears as
+attributes. Home Assistant owns icons and HomeKit presentation.
 
-The app logs and displays every reference filename at startup. At least one OPEN
-and one CLOSED file are required. To add approved originals, place them in their
-labeled source directories and publish a new app version; no inventory edit is
-necessary.
+## Camera observations
 
-## Update
+Sampling runs at one frame per second while stationary and four while movement
+is detected, with a two-second hold after movement. Frames are processed in
+memory. Rolling confirmation reduces state changes caused by isolated uncertain
+frames, while motion immediately clears the previous position confirmation.
 
-New versions appear in Home Assistant after the repository publishes them. Open
-the Vision Gate Controller app page and select **Update** when one is available. No files
-need to be copied into `/addons` and no local rebuild is required.
+The gate polygon describes the corridor swept by my gate leaf. OPEN and CLOSED
+reference frames cover day, IR, and night conditions. Partial frames are held
+out for evaluation and are never loaded as classifier references.
 
-## Entity behaviour
+Travel is measured from 0.0 (closed) to 1.0 (open) and appears in diagnostics.
+It does not reliably distinguish every partial position across lighting
+conditions. The endpoint travel veto is disabled by default because held-out
+reference testing still exposes errors. The offline classification tool
+supports evaluation of these limitations against the production pipeline.
 
-`cover.main_gate` has device class `gate` and supports OPEN and CLOSE only. It
-publishes only the valid Home Assistant Cover states `open`, `closed`,
-`opening`, and `closing`, plus `unknown` when vision cannot confidently place
-the gate. Home Assistant renders it as `unavailable` when the app withdraws
-availability.
+## Controls and diagnostics
 
-Gate Vision owns the physical gate state, vision classification, controller
-state, and command verification. Home Assistant owns presentation: the
-dashboard icon, icon templating, and HomeKit presentation. Configure icons with
-a Home Assistant template or customisation layer; the app publishes none.
+The Ingress dashboard shows the live frame, gate polygon, rectified gate region,
+classifier observations, references, controller state, attempts, and results.
+The Home Assistant cover state appears separately from internal vision and
+controller diagnostics. Dashboard open and close actions use the same controller
+as the cover entity.
 
-Internal diagnostics such as `PARTIAL`, `MOVING`, and fault reasons are exposed
-as entity attributes (`vision_state`, `fault`, `fault_reason`, `target_state`,
-`confirmed_state`, `raw_state`, `controller_state`, `confidence`,
-`last_result`) and are never used as the cover state.
+The manual relay control is a plain toggle with no target or result verification.
+It can operate when vision reports an unknown position, but remains blocked
+while motion or another operation is active.
 
-## Availability
+## Command verification
 
-The entity stays available while the app runs, Home Assistant communication
-works, and the camera can be used to monitor gate state. A single failed frame
-is ignored; the camera must remain offline for
-`camera_unavailable_after_seconds` (default 15) before availability is
-withdrawn.
+Startup never pulses the relay. A restart discards any prior in-progress command
+and re-establishes state from camera observations. Verified commands require a
+known state, and commands are rejected while the gate is moving.
 
-## Web interface
+An operation allows at most three pulses. Retries require stable post-pulse
+camera evidence: a stationary partial position for ten seconds or a confirmed
+wrong endpoint for five seconds, with at least three qualifying observations.
+Motion resets these timers; uncertain evidence never authorizes a retry.
 
-The Ingress panel is always available. It displays the current frame, fixed polygon, perspective-corrected gate region, classifier values, rolling observations, reference filenames, controller state, attempts, results, and the same GateController command path used by `cover.main_gate`. The Home Assistant cover state is shown separately from the richer internal vision and controller states.
-
-## Gate travel
-
-The app measures how far the gate has travelled, from 0.0 (closed) to 1.0
-(fully open), and publishes it as the `travel` attribute and on the Ingress
-debug page.
-
-Travel does not yet gate the reported state. `endpoint_travel_veto` is `false`
-by default because leave-one-out testing shows the measure does not generalise
-to lighting the reference set does not cover: a held-out daytime closed frame
-measures fully open. Enabling it in that state would report a closed gate as
-partial, and a CLOSE command would then pulse the gate back open.
-
-To improve it, add reference frames for conditions not yet covered - dusk,
-rain, headlights - to `references/open` and `references/closed`, publish a new
-version, and re-check. `references/partial` holds labelled partial frames used
-only for testing; the classifier never loads them.
-
-## Adjusting the gate polygon
-
-`gate_polygon` sets the corridor the gate leaf sweeps, as four `"x,y"` corners
-in 1280x720 camera coordinates ordered top-left, top-right, bottom-right,
-bottom-left. The Ingress page draws it on the live frame, so adjust the option,
-restart the app, and check the outline.
-
-Keep it to the gate itself. The original polygon reached into the road, so
-passing vehicles and moving shadows were measured as though they were the gate.
-A rigid leaf sweeping a straight opening projects to a parallelogram, so
-opposite edges should stay parallel.
-
-## Testing frames offline
-
-`tools/classify.py` runs any image through the production pipeline, so edge
-cases can be checked before trusting them. Run it from the `gate_vision`
-directory:
-
-```bash
-python -m tools.classify --validate                   # score the reference set
-python -m tools.classify frame.jpg                    # one frame
-python -m tools.classify ~/captures --expect partial   # a labelled folder
-python -m tools.classify frame.jpg --annotate out/     # draw the leading edge
-python -m tools.classify frame.jpg --veto              # with the veto enabled
-```
-
-It reports the vision position and confidence, measured gate travel, the
-open/closed/partial scores, and the cover state the frame would produce if it
-persisted. `--annotate` writes an image with the gate polygon drawn on the
-frame and the detected leading edge drawn on the rectified region, which is the
-quickest way to see why a frame was read the way it was.
-
-`--validate` is the acceptance test for the reference set. It holds each
-endpoint frame out of its own calibration and reports whether it is still
-recognised, which is the only honest measure: matching a frame that is in its
-own reference set proves nothing. It prints HOLD until leave-one-out is clean,
-at which point `endpoint_travel_veto` becomes safe to enable.
-
-Capture reference and test frames at the camera's full resolution where
-possible. Frames smaller than the live feed calibrate on less detail.
-
-## If the gate state reads unknown
-
-The app reports `unknown` rather than guessing. Use **Send relay pulse (toggle)**
-on the Ingress page to work the gate anyway; it is a plain toggle that does not
-require a known state. Then capture a frame of the condition that confused it,
-add it to `references/open` or `references/closed`, and re-run
-`python -m tools.classify --validate`.
-
-## Safety behavior## Adjusting the gate polygon
-
-`gate_polygon` sets the corridor the gate leaf sweeps, as four `"x,y"` corners
-in 1280x720 camera coordinates ordered top-left, top-right, bottom-right,
-bottom-left. The Ingress page draws it on the live frame, so adjust the option,
-restart the app, and check the outline.
-
-Keep it to the gate itself. The original polygon reached into the road, so
-passing vehicles and moving shadows were measured as though they were the gate.
-A rigid leaf sweeping a straight opening projects to a parallelogram, so
-opposite edges should stay parallel.
-
-## Testing frames offline
-
-`tools/classify.py` runs any image through the production pipeline, so edge
-cases can be checked before trusting them. Run it from the `gate_vision`
-directory:
-
-```bash
-python -m tools.classify --validate                   # score the reference set
-python -m tools.classify frame.jpg                    # one frame
-python -m tools.classify ~/captures --expect partial   # a labelled folder
-python -m tools.classify frame.jpg --annotate out/     # draw the leading edge
-python -m tools.classify frame.jpg --veto              # with the veto enabled
-```
-
-It reports the vision position and confidence, measured gate travel, the
-open/closed/partial scores, and the cover state the frame would produce if it
-persisted. `--annotate` writes an image with the gate polygon drawn on the
-frame and the detected leading edge drawn on the rectified region, which is the
-quickest way to see why a frame was read the way it was.
-
-`--validate` is the acceptance test for the reference set. It holds each
-endpoint frame out of its own calibration and reports whether it is still
-recognised, which is the only honest measure: matching a frame that is in its
-own reference set proves nothing. It prints HOLD until leave-one-out is clean,
-at which point `endpoint_travel_veto` becomes safe to enable.
-
-Capture reference and test frames at the camera's full resolution where
-possible. Frames smaller than the live feed calibrate on less detail.
-
-## If the gate state reads unknown
-
-The app reports `unknown` rather than guessing. Use **Send relay pulse (toggle)**
-on the Ingress page to work the gate anyway; it is a plain toggle that does not
-require a known state. Then capture a frame of the condition that confused it,
-add it to `references/open` or `references/closed`, and re-run
-`python -m tools.classify --validate`.
-
-## Safety behavior
-
-- Startup never pulses the relay.
-- Restart discards any prior in-progress command and re-establishes state from camera frames.
-- Commands are rejected while the gate is moving.
-- Retries require at least three continuous, stable post-pulse camera observations and stop after three total attempts.
-- Camera vision is not an obstruction sensor; the gate's physical safety systems remain authoritative.
+A single failed camera frame does not withdraw availability. The default camera
+offline threshold is fifteen seconds; missing references prevent monitoring
+immediately. Camera vision is not an obstruction sensor, and the gate’s physical
+safety systems remain authoritative.

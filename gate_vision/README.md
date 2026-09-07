@@ -1,6 +1,6 @@
 # Vision Gate Controller — Home Assistant Yellow
 
-Vision Gate Controller is a Home Assistant app that publishes `cover.main_gate` through MQTT Discovery. Camera vision supplies physical state; every command calls `script.main_gate_relay_pulse` through Home Assistant's internal Supervisor/Core proxy and verifies the requested endpoint.
+Vision Gate Controller is my personal Home Assistant app, tailored to my gate and camera on Home Assistant Yellow. GitHub supports updates, change tracking, and maintenance of my installation. It publishes `cover.main_gate` through MQTT Discovery. Camera vision supplies physical state; every command calls `script.main_gate_relay_pulse` through Home Assistant's internal Supervisor/Core proxy and verifies the requested endpoint.
 
 ## Runtime
 
@@ -173,9 +173,9 @@ frames this small.
 
 Every supported image file beneath `references/open` and `references/closed` is enumerated, logged by filename, transformed through the same pipeline, and used. There is no filename allowlist or maximum count. The classifier becomes operational when at least one valid OPEN and one valid CLOSED image exist.
 
-The published image contains four original reference files. To add new reference
-frames, place them in the appropriate source directory, increment the app version,
-and publish the repository change. The next GitHub build includes them automatically.
+The reference set contains OPEN and CLOSED frames from my camera in day, IR,
+and night conditions. These frames are part of the app image and tie the
+classifier to this particular gate and viewpoint.
 
 ## Entity transport
 
@@ -196,4 +196,4 @@ Camera sampling is fixed at 1 Hz while stationary and 4 Hz after movement is det
 Old polling values retained in an existing App's `options.json` are ignored. The browser
 checks the lightweight status endpoint at 4 Hz so it can display movement promptly.
 
-See `DOCS.md` for installation and update instructions.
+See [Runtime behaviour](DOCS.md) for more detail on this installation.

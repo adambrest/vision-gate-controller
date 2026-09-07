@@ -1,45 +1,31 @@
-# Vision Gate Controller — Home Assistant App Repository
+# Vision Gate Controller
 
-This repository distributes **Vision Gate Controller**, a camera-verified controller for a
-Home Assistant gate. It publishes `cover.main_gate` through MQTT Discovery and
-provides an Ingress dashboard for status and control.
+My personal camera-verified gate controller for Home Assistant Yellow. It connects
+my gate camera and relay to Home Assistant so I can see the gate’s observed state
+and control it from a single entity and dashboard.
 
-[![Open your Home Assistant instance and add this app repository.](https://my.home-assistant.io/badges/supervisor_store.svg)](https://my.home-assistant.io/redirect/supervisor_store/?repository_url=https%3A%2F%2Fgithub.com%2Fadambrest%2Fvision-gate-controller)
+This project is tailored to my own gate, camera view, and Home Assistant setup.
+GitHub holds the source and change history and supports easier updates and
+maintenance of my installation.
 
-## Install
+## How it works
 
-1. Install and start the official **Mosquitto broker** app, then configure the
-   Home Assistant MQTT integration.
-2. Click the button above, or open **Settings → Apps → App store**, open the
-   repository menu, and add:
+The controller compares camera snapshots with reference images of my open and
+closed gate, tracks movement, and publishes `cover.main_gate` through MQTT.
+Open and close commands pulse the gate relay through Home Assistant, then use
+camera observations to verify the result. Recovery is limited to three pulses
+per operation, and no pulse is sent while movement is detected.
 
-   ```text
-   https://github.com/adambrest/vision-gate-controller
-   ```
+An Ingress dashboard shows the current camera frame, gate state, and diagnostics,
+with open, close, and manual relay controls. When camera evidence is uncertain,
+the reported state is `unknown`. Home Assistant handles dashboard and HomeKit
+presentation.
 
-3. Find **Vision Gate Controller** in the app store and select **Install**.
-4. Review its configuration, start it, and enable **Show in sidebar** if wanted.
-5. Wait for three valid camera confirmations. MQTT Discovery will then create
-   `cover.main_gate` with device class `gate`.
+The vision is specific to this camera view and its reference frames. Partial
+travel measurement remains limited, particularly across different lighting
+conditions. The gate’s physical safety systems remain responsible for
+obstruction protection.
 
-See the [Vision Gate Controller documentation](./gate_vision/DOCS.md) for prerequisites,
-configuration, operation, and safety behavior.
-
-## Ownership
-
-Gate Vision owns the physical gate state, vision classification, controller
-state, and command verification. Home Assistant owns presentation: the dashboard
-icon, icon templating, and HomeKit presentation. The app publishes no icon.
-
-`cover.main_gate` uses only the valid Home Assistant Cover states `open`,
-`closed`, `opening`, `closing`, and `unknown`, and Home Assistant renders it as
-`unavailable` when availability is withdrawn.
-
-## Apps
-
-### [Vision Gate Controller](./gate_vision)
-
-![Supports aarch64 architecture](https://img.shields.io/badge/aarch64-yes-green.svg)
-
-The published container image is built automatically with Home Assistant's
-official builder actions whenever `main` changes.
+[Technical overview](gate_vision/README.md) ·
+[Runtime behaviour](gate_vision/DOCS.md) ·
+[Change history](gate_vision/CHANGELOG.md)
