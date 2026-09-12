@@ -305,6 +305,56 @@ def test_every_endpoint_reference_reaches_the_confirmation_threshold() -> None:
             assert observation.confidence >= 0.80, f"{name} scored {observation.confidence}"
 
 
+def observe_reference(classifier: ReferenceClassifier, kind: str, name: str) -> Observation:
+    classifier.previous = None
+    observation, _ = classifier.observe(
+        read_frame(REFERENCES / kind / f"{name}.jpg"),
+        sample_interval_seconds=1.0,
+        timestamp=datetime.now(UTC),
+    )
+    return observation
+
+
+@pytest.mark.parametrize("name", ["Day-partial-mostly-open", "Day-partial1", "IR-partial2"])
+def test_nearly_open_gate_is_not_reported_open(name: str) -> None:
+    """These confirmed OPEN, so a gate left short of open was never finished."""
+    observation = observe_reference(real_classifier(), "partial", name)
+    assert observation.position is GatePosition.PARTIALLY_OPEN
+    # Clears the controller's bar, so partial-stall recovery can act on it.
+    assert observation.confidence >= 0.70
+
+
+def test_clearance_check_leaves_only_one_partial_read_as_an_endpoint() -> None:
+    classifier = real_classifier()
+    misread = [
+        name
+        for name in labelled("partial")
+        if observe_reference(classifier, "partial", name).position
+        in (GatePosition.OPEN, GatePosition.CLOSED)
+    ]
+    assert misread == ["Night-partial1"]
+
+
+def test_held_out_open_frames_still_clear_the_parked_leaf() -> None:
+    """A false partial on a truly open gate would let OPEN pulse it shut."""
+    opens = sorted((REFERENCES / "open").glob("*.jpg"))
+    closeds = sorted((REFERENCES / "closed").glob("*.jpg"))
+    read = lambda p: extract_gate_region(read_frame(p))
+    for held in opens:
+        travel = GateTravel()
+        travel.calibrate([read(p) for p in opens if p != held], [read(p) for p in closeds])
+        assert travel.clearance(read(held)) >= Settings().open_clearance_minimum + 0.10, held.stem
+
+
+def test_clearance_check_only_ever_downgrades_open() -> None:
+    classifier = real_classifier()
+    assert classifier._require_clearance(GatePosition.CLOSED, 0.9, 0.0) == (GatePosition.CLOSED, 0.9)
+    assert classifier._require_clearance(GatePosition.OPEN, 0.9, None) == (GatePosition.OPEN, 0.9)
+    assert classifier._require_clearance(GatePosition.OPEN, 0.9, 0.8) == (GatePosition.OPEN, 0.9)
+    disabled = real_classifier(open_clearance_minimum=0.0)
+    assert disabled._require_clearance(GatePosition.OPEN, 0.9, 0.1) == (GatePosition.OPEN, 0.9)
+
+
 def test_validate_reports_the_veto_acceptance_criterion() -> None:
     """The tool must refuse to green-light the veto while leave-one-out fails."""
     from app.config import Settings as S

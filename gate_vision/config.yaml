@@ -1,5 +1,5 @@
 name: "Vision Gate Controller"
-version: "1.2.0"
+version: "1.2.1"
 slug: "gate_vision"
 description: "Personal camera-verified gate controller for my Home Assistant Yellow"
 url: "https://github.com/adambrest/vision-gate-controller/tree/main/gate_vision"
@@ -29,6 +29,7 @@ options:
   endpoint_travel_tolerance: 0.08
   endpoint_travel_veto: false
   endpoint_travel_corroboration: true
+  open_clearance_minimum: 0.5
   gate_polygon: "326.3,296.7 616.7,391.3 611.2,502.4 320.8,407.8"
 schema:
   camera_entity: str
@@ -44,4 +45,5 @@ schema:
   endpoint_travel_tolerance: float
   endpoint_travel_veto: bool
   endpoint_travel_corroboration: bool
+  open_clearance_minimum: float
   gate_polygon: str

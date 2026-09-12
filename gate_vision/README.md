@@ -139,7 +139,14 @@ calibration:
 | Endpoints, in-set | 6/6 exact (open 100%, closed 0%) |
 | Endpoints, leave-one-out | 5/6 (open 3/3, closed 2/3) |
 | Held-out partial frames detected | 4/11 |
+| Held-out partial frames read as an endpoint (with the clearance check) | 1/11 |
 | Endpoint frames misread as partial | 0 |
+
+Travel alone reads a leaf stopped just short of open as fully open, because an
+angled, nearly-folded leaf matches no closed reference. OPEN therefore also
+requires the columns beside the parked leaf to match an open gate
+(`open_clearance_minimum`, default 0.50). Held-out open frames score at least
+0.64 there; the near-open partials that used to confirm OPEN score about 0.37.
 
 Endpoints are reliable. **Partial position is not solved.** Four approaches
 were measured and rejected:

@@ -58,6 +58,9 @@ TRAVEL_COLUMNS = 256
 TRAVEL_ROWS = 128
 # Background columns that end the gate leaf's contiguous run.
 TRAVEL_EDGE_GAP = 6
+# Columns just past the parked leaf. A gate that stops short of open leaves its
+# leaf standing here, so an open gate must show them as clear.
+CLEARANCE_COLUMNS = 32
 
 
 def decode_frame(encoded: np.ndarray) -> np.ndarray | None:
@@ -223,6 +226,25 @@ class GateTravel:
             return None
         return float(np.clip((TRAVEL_COLUMNS - edge) / span, 0.0, 1.0))
 
+    def clearance(self, region: np.ndarray) -> float | None:
+        """How closely the columns beside the parked leaf match an open gate.
+
+        `measure` asks "does this look like the closed leaf", and a leaf that
+        stopped just short of open is folded at an angle no closed reference
+        has, so it reads as fully open. This asks the opposite question of the
+        place that leaf would be standing. Measured on the reference set, every
+        open frame held out of calibration scores at least 0.64 here, while the
+        near-open partials that read as OPEN score about 0.37.
+        """
+        if not self.ready:
+            return None
+        current = self._column_normalise(self._prepare(region))
+        start = self._parked_end
+        band = self._best_match(current[:, start : start + CLEARANCE_COLUMNS], [
+            reference[:, start : start + CLEARANCE_COLUMNS] for reference in self._open
+        ])
+        return float(band.mean()) if band.size else None
+
 
 class ReferenceClassifier:
     """Small HOG/layout matcher that uses every labeled reference file."""
@@ -237,12 +259,14 @@ class ReferenceClassifier:
         endpoint_travel_tolerance: float = 0.08,
         endpoint_travel_veto: bool = False,
         endpoint_travel_corroboration: bool = True,
+        open_clearance_minimum: float = 0.50,
     ) -> None:
         self.reference_root = reference_root
         self.expected_count = expected_count
         self.endpoint_travel_tolerance = endpoint_travel_tolerance
         self.endpoint_travel_veto = endpoint_travel_veto
         self.endpoint_travel_corroboration = endpoint_travel_corroboration
+        self.open_clearance_minimum = open_clearance_minimum
         self.travel = GateTravel()
         self.features: dict[GatePosition, list[np.ndarray]] = {
             GatePosition.OPEN: [],
@@ -361,6 +385,8 @@ class ReferenceClassifier:
         travel = self.travel.measure(region)
         position, confidence = self._corroborate(position, confidence, travel, closed_score > open_score)
         position, confidence = self._apply_travel(position, confidence, travel)
+        clearance = self.travel.clearance(region)
+        position, confidence = self._require_clearance(position, confidence, clearance)
 
         return Observation(
             position,
@@ -372,7 +398,31 @@ class ReferenceClassifier:
             is_moving,
             timestamp,
             travel=travel,
+            clearance=clearance,
         ), region
+
+    def _require_clearance(
+        self,
+        position: GatePosition,
+        confidence: float,
+        clearance: float | None,
+    ) -> tuple[GatePosition, float]:
+        """Refuse OPEN while the leaf is still standing beside its parked spot.
+
+        Region similarity and travel both call a nearly-open gate fully open, so
+        it confirmed OPEN and nothing ever tried to finish the move. Only OPEN is
+        downgraded; CLOSED and every other reading pass through untouched.
+        Disable with an `open_clearance_minimum` of 0.
+        """
+        if position is not GatePosition.OPEN or clearance is None:
+            return position, confidence
+        minimum = self.open_clearance_minimum
+        if clearance >= minimum:
+            return position, confidence
+        # At or above the controller's 0.70 bar, so the partial-stall recovery
+        # can finish the move.
+        shortfall = (minimum - clearance) / max(minimum, 1e-6)
+        return GatePosition.PARTIALLY_OPEN, float(np.clip(0.70 + shortfall * 0.30, 0.70, 1.0))
 
     def _corroborate(
         self,

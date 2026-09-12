@@ -139,7 +139,12 @@ class Runtime:
                 if self.latest_observation.travel is not None
                 else None
             ),
-            "fault": fault_reason is not None,
+            "clearance": (
+                round(self.latest_observation.clearance, 4)
+                if self.latest_observation.clearance is not None
+                else None
+            ),
+            "fault":fault_reason is not None,
             "fault_reason": fault_reason,
             "open_score": round(self.latest_observation.open_score, 4),
             "closed_score": round(self.latest_observation.closed_score, 4),
@@ -267,8 +272,9 @@ async def run() -> None:
         endpoint_travel_tolerance=settings.endpoint_travel_tolerance,
         endpoint_travel_veto=settings.endpoint_travel_veto,
         endpoint_travel_corroboration=settings.endpoint_travel_corroboration,
+        open_clearance_minimum=settings.open_clearance_minimum,
     )
-    vision = RollingVision(settings.confirmation_window, settings.confirmation_required)
+    vision =RollingVision(settings.confirmation_window, settings.confirmation_required)
     runtime = Runtime(settings, camera, classifier, vision)
     mqtt = MqttCover(runtime.status_payload)
     controller = GateController(

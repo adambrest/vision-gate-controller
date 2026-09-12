@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.1
+
+- Fix a gate left just short of open confirming OPEN. Region similarity and
+  travel both read a nearly-open leaf as fully open, so the cover said `open`,
+  no fault was raised, and the partial-stall recovery never engaged.
+- OPEN now also requires the columns beside the parked leaf to match an open
+  gate (`open_clearance_minimum`, default 0.50; 0 disables). A leaf stopped
+  short stands exactly there. Only OPEN is ever downgraded, to PARTIALLY_OPEN
+  at 0.70 confidence or above so a stranded gate stays commandable.
+- Partials read as an endpoint fall from 4/11 to 1/11 (`Night-partial1`, dusk
+  lighting, still reads OPEN). Every open frame held out of calibration still
+  clears the check, at 0.64 or above. Endpoint results are unchanged.
+- Publish `clearance` in the status payload and print it from `tools.classify`,
+  so the threshold can be checked against live frames.
+
 ## 1.2.0
 
 Tuned for a stable week of real use: steady when it is sure, `unknown` when it

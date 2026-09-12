@@ -22,6 +22,9 @@ class Settings:
     endpoint_travel_tolerance: float = 0.08
     endpoint_travel_veto: bool = False
     endpoint_travel_corroboration: bool = True
+    # OPEN needs the columns beside the parked leaf to match an open gate this
+    # well. 0 disables the check.
+    open_clearance_minimum: float = 0.50
     # Corridor corners as "x,y" pairs in 1280x720 camera coordinates: the gate
     # travel corridor, ordered top-left, top-right, bottom-right, bottom-left.
     gate_polygon: str = "326.3,296.7 616.7,391.3 611.2,502.4 320.8,407.8"
@@ -60,6 +63,8 @@ class Settings:
             raise ValueError("moving polling interval cannot exceed the normal interval")
         if not 0.0 < self.endpoint_travel_tolerance < 0.5:
             raise ValueError("endpoint_travel_tolerance must be between 0 and 0.5")
+        if not 0.0 <= self.open_clearance_minimum < 1.0:
+            raise ValueError("open_clearance_minimum must be between 0 and 1")
         if self.camera_unavailable_after_seconds < self.snapshot_interval_seconds:
             raise ValueError(
                 "camera_unavailable_after_seconds must outlast a single camera frame"

@@ -172,6 +172,17 @@ def validate(root: Path, settings) -> int:
         print(f"  {kind:<7} {len(group) - len(bad)}/{len(group)}"
               + ("" if not bad else "   failing: " + ", ".join(f"{n} ({v*100:.0f}%)" for n, v in bad)))
 
+    # A held-out open frame refused by the clearance check would read partial.
+    blocked = []
+    for held in opens:
+        travel = GateTravel()
+        travel.calibrate([read(p) for p in opens if p != held], [read(p) for p in closeds])
+        value = travel.clearance(read(held))
+        if value is not None and value < settings.open_clearance_minimum:
+            blocked.append((held.stem, value))
+    print(f"  open clearance {len(opens) - len(blocked)}/{len(opens)}"
+          + ("" if not blocked else "   failing: " + ", ".join(f"{n} ({v:.2f})" for n, v in blocked)))
+
     wrong = [p.stem for p in partials
              if (lambda o: o.position in (GatePosition.OPEN, GatePosition.CLOSED) and o.confidence >= 0.80)(
                  classifier.observe(read_frame(p), sample_interval_seconds=1.0,
@@ -241,6 +252,11 @@ def main() -> int:
         print(f"\n{path.name}   [{frame.shape[1]}x{frame.shape[0]} decoded]")
         print(f"  vision position   {observation.position.value}  (confidence {observation.confidence:.2f})")
         print(f"  gate travel       {travel_text}  -> {verdict}")
+        if observation.clearance is not None:
+            print(
+                f"  open clearance    {observation.clearance:.2f}  "
+                f"(OPEN needs {settings.open_clearance_minimum:.2f})"
+            )
         print(
             f"  scores            open {observation.open_score:.2f}  "
             f"closed {observation.closed_score:.2f}  partial {observation.partial_score:.2f}"

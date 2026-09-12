@@ -75,6 +75,7 @@ class Observation:
     is_moving: bool = False
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     travel: float | None = None
+    clearance: float | None = None
 
     def payload(self) -> dict[str, object]:
         payload = asdict(self)
