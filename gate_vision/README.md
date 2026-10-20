@@ -27,8 +27,8 @@ icon-selection logic, so icons are changed entirely in Home Assistant.
 | --- | --- |
 | `open` | Rolling camera confirmation currently says OPEN. |
 | `closed` | Rolling camera confirmation currently says CLOSED. |
-| `opening` | An OPEN command was accepted and is still in progress. |
-| `closing` | A CLOSE command was accepted and is still in progress. |
+| `opening` | An OPEN command is active, or manual opening is inferred from camera motion. |
+| `closing` | A CLOSE command is active, or manual closing is inferred from camera motion. |
 | `unknown` | No operation is active and vision is not confidently OPEN or CLOSED. |
 | `unavailable` | Home Assistant's own state when availability is withdrawn. |
 
@@ -37,9 +37,10 @@ truth and applies exactly these rules, in order:
 
 1. An active operation targeting OPEN reports `opening`.
 2. An active operation targeting CLOSED reports `closing`.
-3. A current rolling confirmation of OPEN reports `open`.
-4. A current rolling confirmation of CLOSED reports `closed`.
-5. Anything else reports `unknown`.
+3. Camera motion from the last confirmed endpoint reports `opening` or `closing`.
+4. A current rolling confirmation of OPEN reports `open`.
+5. A current rolling confirmation of CLOSED reports `closed`.
+6. Anything else reports `unknown`.
 
 `opening` and `closing` are published the moment GateController accepts the
 command, without waiting for the next camera frame. A confirmation the rolling
@@ -99,7 +100,7 @@ while the gate is moving, and while another operation is running.
 
 An operation has at most three pulses total: the initial pulse and no more than two retries.
 
-- A continuously stationary, confident `PARTIALLY_OPEN` gate permits a retry after 10 seconds.
+- A continuously stationary, confident `PARTIALLY_OPEN` gate permits a retry after 5 seconds.
 - A confidently confirmed wrong endpoint permits a retry after five seconds.
 - Either retry condition requires at least three qualifying post-pulse frames.
 - Motion resets both timers.
@@ -204,3 +205,10 @@ Old polling values retained in an existing App's `options.json` are ignored. The
 checks the lightweight status endpoint at 4 Hz so it can display movement promptly.
 
 See [Runtime behaviour](DOCS.md) for more detail on this installation.
+
+Camera-detected manual travel reports opening after departure from closed and
+closing after departure from open. A confident stationary partial gate for five
+continuous seconds starts recovery towards the opposite of the last confirmed
+endpoint. This runs once per departure, with at most three relay attempts.
+Movement, uncertain frames, and camera interruptions reset the stall timer.
+Without a known previous endpoint, no automatic recovery is attempted.

@@ -49,7 +49,7 @@ class GateController:
         vision: RollingVision,
         *,
         travel_timeout_seconds: float = 35.0,
-        partial_stall_seconds: float = 10.0,
+        partial_stall_seconds: float = 5.0,
         wrong_endpoint_seconds: float = 5.0,
         max_attempts: int = 3,
         on_change: ChangeCallback | None = None,
@@ -64,6 +64,64 @@ class GateController:
         self.operation = Operation(max_attempts=self.max_attempts)
         self.events: deque[dict[str, str]] = deque(maxlen=100)
         self._lock = asyncio.Lock()
+        self.observed_target: GateTarget | None = None
+        self._last_endpoint: GatePosition | None = None
+        self._recovery_used = False
+        self._stationary_since: datetime | None = None
+
+    def monitoring_interrupted(self) -> None:
+        """Missing camera evidence breaks the continuous stall interval."""
+        self._stationary_since = None
+
+    def observe(self, snapshot: VisionSnapshot) -> GateTarget | None:
+        """Track manual travel and authorize one recovery operation per departure.
+
+        Unknown imagery is not a physical fault. Only continuous, confident,
+        stationary partial observations can authorize an automatic relay pulse.
+        """
+        latest = snapshot.latest
+        endpoint = (
+            snapshot.confirmation_current
+            and latest.position == snapshot.confirmed
+            and latest.confidence >= 0.80
+            and not latest.is_moving
+        )
+        if endpoint:
+            self._last_endpoint = snapshot.confirmed
+            self.observed_target = None
+            self._stationary_since = None
+            self._recovery_used = False
+            return None
+        if self._last_endpoint is not None:
+            self.observed_target = (
+                GateTarget.OPEN if self._last_endpoint == GatePosition.CLOSED
+                else GateTarget.CLOSED
+            )
+        if self._lock.locked():
+            # Explicit commands own this departure, including their retry budget.
+            self._recovery_used = True
+        if (
+            latest.position != GatePosition.PARTIALLY_OPEN
+            or latest.confidence < 0.70
+            or latest.is_moving
+        ):
+            self._stationary_since = None
+            return None
+        if self._stationary_since is None:
+            self._stationary_since = latest.timestamp
+        duration = (latest.timestamp - self._stationary_since).total_seconds()
+        if (
+            duration >= self.partial_stall_seconds
+            and self.observed_target is not None
+            and not self._recovery_used
+            and not self._lock.locked()
+        ):
+            self._recovery_used = True
+            self._event(f"Manual travel stalled; recovering towards {self.observed_target.value}")
+            return self.observed_target
+        return None
+
+
 
     @property
     def active(self) -> bool:

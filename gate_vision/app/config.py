@@ -15,7 +15,7 @@ class Settings:
     confirmation_window: int = 4
     confirmation_required: int = 3
     gate_travel_timeout_seconds: float = 35.0
-    partial_stall_seconds: float = 10.0
+    partial_stall_seconds: float = 5.0
     wrong_endpoint_seconds: float = 5.0
     max_gate_attempts: int = 3
     camera_unavailable_after_seconds: float = 15.0
@@ -35,6 +35,9 @@ class Settings:
         # These rates are fixed. Discard stale values retained by older installs.
         values.pop("snapshot_interval_seconds", None)
         values.pop("moving_interval_seconds", None)
+        # Recovery now requires five seconds, including on existing installs.
+        values["partial_stall_seconds"] = 5.0
+        values["wrong_endpoint_seconds"] = 5.0
         settings = cls(**{key: value for key, value in values.items() if key in cls.__annotations__})
         settings.validate()
         return settings

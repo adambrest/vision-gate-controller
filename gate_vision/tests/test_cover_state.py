@@ -406,3 +406,28 @@ def test_a_manual_pulse_is_not_a_fault() -> None:
         )
         is None
     )
+
+
+@pytest.mark.parametrize('origin,target,state', [
+    (GatePosition.CLOSED, GateTarget.OPEN, CoverState.OPENING),
+    (GatePosition.OPEN, GateTarget.CLOSED, CoverState.CLOSING),
+])
+def test_camera_detected_manual_motion_reports_direction(origin, target, state):
+    assert get_effective_cover_state(
+        active_target=None, confirmed=origin, confirmation_current=False,
+        observed_target=target, is_moving=True,
+    ) == state
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('endpoint,expected', [
+    (GatePosition.CLOSED, 'opening'), (GatePosition.OPEN, 'closing'),
+])
+async def test_runtime_publishes_camera_detected_manual_direction(endpoint, expected):
+    harness = Harness()
+    runtime = build_runtime(harness, Clock())
+    await harness.see(endpoint, 3)
+    harness.controller.observe(await harness.vision.snapshot())
+    await harness.see(GatePosition.PARTIALLY_OPEN, moving=True)
+    harness.controller.observe(await harness.vision.snapshot())
+    assert sync(runtime, harness)['cover_state'] == expected

@@ -52,7 +52,7 @@ and re-establishes state from camera observations. Verified commands require a
 known state, and commands are rejected while the gate is moving.
 
 An operation allows at most three pulses. Retries require stable post-pulse
-camera evidence: a stationary partial position for ten seconds or a confirmed
+camera evidence: a stationary partial position for five seconds or a confirmed
 wrong endpoint for five seconds, with at least three qualifying observations.
 Motion resets these timers; uncertain evidence never authorizes a retry.
 

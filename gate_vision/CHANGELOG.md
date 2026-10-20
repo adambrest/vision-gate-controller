@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.2
+
+- Report camera-detected manual opening and closing to Home Assistant and HomeKit.
+- Reduce stationary partial-stall retries to five seconds.
+- Recover a stationary partial gate after five continuous seconds towards the
+  opposite of its last confirmed endpoint, once per departure with a maximum
+  of three attempts. Movement, uncertain frames, and camera outages reset the timer.
+
 ## 1.2.1
 
 - Fix a gate left just short of open confirming OPEN. Region similarity and

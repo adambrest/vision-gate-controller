@@ -92,6 +92,8 @@ class Runtime:
             active_target=controller.requested_target if controller is not None else None,
             confirmed=self.confirmed_state,
             confirmation_current=self.confirmation_current,
+            observed_target=controller.observed_target if controller is not None else None,
+            is_moving=self.latest_observation.is_moving,
         ).value
 
     def update_availability(self) -> bool:
@@ -144,7 +146,7 @@ class Runtime:
                 if self.latest_observation.clearance is not None
                 else None
             ),
-            "fault":fault_reason is not None,
+            "fault": fault_reason is not None,
             "fault_reason": fault_reason,
             "open_score": round(self.latest_observation.open_score, 4),
             "closed_score": round(self.latest_observation.closed_score, 4),
@@ -198,6 +200,10 @@ class Runtime:
                 self.confirmed_state = snapshot.confirmed
                 self.confirmation_current = snapshot.confirmation_current
                 self.recent_observations = snapshot.observations
+                if self.controller is not None:
+                    recovery_target = self.controller.observe(snapshot)
+                    if recovery_target is not None:
+                        self.start_request(recovery_target, source="camera_recovery")
                 frame_completed_at = loop.time()
                 last_sample_at = cycle_started
                 self._completed_frame_times.append(frame_completed_at)
@@ -210,6 +216,8 @@ class Runtime:
                 was_online = True
                 self._log_vision_change(observation, snapshot.confirmed)
             except Exception as exc:
+                if self.controller is not None:
+                    self.controller.monitoring_interrupted()
                 if was_online is not False:
                     LOGGER.warning("Camera offline: %s", exc)
                 was_online = False
@@ -274,7 +282,7 @@ async def run() -> None:
         endpoint_travel_corroboration=settings.endpoint_travel_corroboration,
         open_clearance_minimum=settings.open_clearance_minimum,
     )
-    vision =RollingVision(settings.confirmation_window, settings.confirmation_required)
+    vision = RollingVision(settings.confirmation_window, settings.confirmation_required)
     runtime = Runtime(settings, camera, classifier, vision)
     mqtt = MqttCover(runtime.status_payload)
     controller = GateController(

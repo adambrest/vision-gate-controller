@@ -56,7 +56,7 @@ def controller(relay: FakeRelay, vision: RollingVision, timeout: float = 0.2) ->
         relay,
         vision,
         travel_timeout_seconds=timeout,
-        partial_stall_seconds=10,
+        partial_stall_seconds=5,
         wrong_endpoint_seconds=5,
         max_attempts=3,
     )
@@ -133,7 +133,7 @@ async def test_wrong_endpoint_for_five_seconds_allows_one_retry() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stationary_partial_for_ten_seconds_allows_retry() -> None:
+async def test_stationary_partial_for_five_seconds_allows_retry() -> None:
     vision, relay = RollingVision(), FakeRelay()
     await add(vision, GatePosition.CLOSED, 3)
     gate = controller(relay, vision)
@@ -273,3 +273,46 @@ async def test_manual_pulse_is_rejected_while_another_operation_runs() -> None:
         await gate.manual_pulse()
     first.cancel()
     await asyncio.gather(first, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('endpoint,target', [
+    (GatePosition.CLOSED, GateTarget.OPEN),
+    (GatePosition.OPEN, GateTarget.CLOSED),
+])
+async def test_manual_departure_recovers_once_after_five_seconds(endpoint, target):
+    vision, relay = RollingVision(), FakeRelay()
+    gate = GateController(relay, vision)
+    await add(vision, endpoint, 3)
+    gate.observe(await vision.snapshot())
+    base = datetime.now(UTC)
+    for second in range(7):
+        snapshot = await vision.add(Observation(
+            GatePosition.PARTIALLY_OPEN, 0.96,
+            timestamp=base + timedelta(seconds=second),
+        ))
+        recovery = gate.observe(snapshot)
+        assert recovery == (target if second == 5 else None)
+    assert gate.observed_target == target
+
+
+@pytest.mark.asyncio
+async def test_manual_recovery_requires_known_origin_and_continuous_stationary_evidence():
+    vision, relay = RollingVision(), FakeRelay()
+    gate = GateController(relay, vision)
+    base = datetime.now(UTC)
+    for second in range(8):
+        snapshot = await vision.add(Observation(
+            GatePosition.PARTIALLY_OPEN, 0.96,
+            timestamp=base + timedelta(seconds=second),
+        ))
+        assert gate.observe(snapshot) is None
+    await add(vision, GatePosition.CLOSED, 3)
+    gate.observe(await vision.snapshot())
+    for second in range(10):
+        snapshot = await vision.add(Observation(
+            GatePosition.PARTIALLY_OPEN, 0.96,
+            is_moving=second == 4,
+            timestamp=base + timedelta(seconds=10 + second),
+        ))
+        assert gate.observe(snapshot) is None

@@ -1,5 +1,5 @@
 name: "Vision Gate Controller"
-version: "1.2.1"
+version: "1.2.2"
 slug: "gate_vision"
 description: "Personal camera-verified gate controller for my Home Assistant Yellow"
 url: "https://github.com/adambrest/vision-gate-controller/tree/main/gate_vision"
@@ -22,7 +22,7 @@ options:
   confirmation_window: 4
   confirmation_required: 3
   gate_travel_timeout_seconds: 35
-  partial_stall_seconds: 10
+  partial_stall_seconds: 5
   wrong_endpoint_seconds: 5
   max_gate_attempts: 3
   camera_unavailable_after_seconds: 15
