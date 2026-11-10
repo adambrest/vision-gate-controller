@@ -37,32 +37,23 @@ def get_effective_cover_state(
     active_target: GateTarget | None,
     confirmed: GatePosition,
     confirmation_current: bool,
-    observed_target: GateTarget | None = None,
+    last_endpoint: GatePosition = GatePosition.UNKNOWN,
     is_moving: bool = False,
 ) -> CoverState:
-    """Resolve the Home Assistant cover state.
-
-    `active_target` is the target of an operation that is still running, so an
-    accepted OPEN or CLOSE reports `opening`/`closing` before the next camera
-    frame arrives. Manual movement uses the direction inferred from the last
-    endpoint. Stationary state follows rolling camera confirmation, and a
-    confirmation the rolling window no longer supports is never reused.
-    """
+    """Only integration commands report motion; otherwise hold a completed endpoint."""
     if active_target is GateTarget.OPEN:
         return CoverState.OPENING
     if active_target is GateTarget.CLOSED:
         return CoverState.CLOSING
-    if is_moving:
-        if observed_target is GateTarget.OPEN:
-            return CoverState.OPENING
-        if observed_target is GateTarget.CLOSED:
-            return CoverState.CLOSING
-        return CoverState.UNKNOWN
-    if confirmation_current:
+    if confirmation_current and not is_moving:
         if confirmed is GatePosition.OPEN:
             return CoverState.OPEN
         if confirmed is GatePosition.CLOSED:
             return CoverState.CLOSED
+    if last_endpoint is GatePosition.OPEN:
+        return CoverState.OPEN
+    if last_endpoint is GatePosition.CLOSED:
+        return CoverState.CLOSED
     return CoverState.UNKNOWN
 
 

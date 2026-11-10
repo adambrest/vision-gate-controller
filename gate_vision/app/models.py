@@ -91,7 +91,7 @@ class Operation:
     state: ControllerState = ControllerState.IDLE
     result: OperationResult | None = None
     attempt: int = 0
-    max_attempts: int = 3
+    max_attempts: int = 1
     status: str = "Idle"
     started_at: datetime | None = None
     completed_at: datetime | None = None

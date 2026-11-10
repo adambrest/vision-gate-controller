@@ -52,10 +52,8 @@ class Harness:
             self.relay,
             self.vision,
             travel_timeout_seconds=5,
-            partial_stall_seconds=10,
-            wrong_endpoint_seconds=5,
-            max_attempts=3,
         )
+        self.last_endpoint = GatePosition.UNKNOWN
         self.confirmed = GatePosition.UNKNOWN
         self.confirmation_current = False
         self.latest = Observation(GatePosition.UNKNOWN, 0.0)
@@ -82,12 +80,16 @@ class Harness:
             self.latest = observation
             self.confirmed = snapshot.confirmed
             self.confirmation_current = snapshot.confirmation_current
+            if snapshot.confirmation_current and not observation.is_moving:
+                self.last_endpoint = snapshot.confirmed
 
     def state(self) -> str:
         return get_effective_cover_state(
             active_target=self.controller.requested_target,
             confirmed=self.confirmed,
             confirmation_current=self.confirmation_current,
+            last_endpoint=self.last_endpoint,
+            is_moving=self.latest.is_moving,
         ).value
 
     def vision_state(self) -> VisionState:
@@ -99,7 +101,7 @@ class Harness:
 
     async def request(self, target: GateTarget) -> asyncio.Task:
         """Start a request and return once the controller has accepted it."""
-        task = asyncio.create_task(self.controller.request_state(target, source="test"))
+        task = asyncio.create_task(self.controller.request_state(target, source="home_assistant"))
         while not self.controller.active:
             await asyncio.sleep(0)
         return task
@@ -176,17 +178,17 @@ async def test_idle_without_confident_confirmation_reports_unknown() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stale_confirmation_is_not_reused_indefinitely() -> None:
+async def test_last_completed_endpoint_is_held_until_another_is_confirmed() -> None:
     harness = Harness()
     await harness.see(GatePosition.CLOSED, 3)
     assert harness.state() == "closed"
     # Hysteresis holds the confirmation through a brief wobble ...
     await harness.see(GatePosition.UNKNOWN, 2)
     assert harness.state() == "closed"
-    # ... but not once the window no longer supports it at all.
+    # The external cover holds the last endpoint even after vision loses it.
     await harness.see(GatePosition.UNKNOWN, 2)
     assert harness.confirmed is GatePosition.CLOSED
-    assert harness.state() == "unknown"
+    assert harness.state() == "closed"
 
 
 @pytest.mark.asyncio
@@ -214,7 +216,7 @@ async def test_moving_gate_is_a_diagnostic_not_a_cover_state() -> None:
     await harness.see(GatePosition.PARTIALLY_OPEN, 2, moving=True)
     assert harness.vision_state() is VisionState.MOVING
     assert harness.state() in HA_COVER_STATES
-    assert harness.state() == "unknown"
+    assert harness.state() == "open"
 
 
 def test_sustained_camera_failure_makes_the_entity_unavailable() -> None:
@@ -391,7 +393,8 @@ async def test_motion_drops_the_confirmation_immediately() -> None:
     await harness.see(GatePosition.CLOSED, 3)
     assert harness.state() == "closed"
     await harness.see(GatePosition.CLOSED, 1, moving=True)
-    assert harness.state() == "unknown"
+    assert harness.confirmation_current is False
+    assert harness.state() == "closed"
 
 
 def test_a_manual_pulse_is_not_a_fault() -> None:
@@ -408,26 +411,36 @@ def test_a_manual_pulse_is_not_a_fault() -> None:
     )
 
 
-@pytest.mark.parametrize('origin,target,state', [
-    (GatePosition.CLOSED, GateTarget.OPEN, CoverState.OPENING),
-    (GatePosition.OPEN, GateTarget.CLOSED, CoverState.CLOSING),
-])
-def test_camera_detected_manual_motion_reports_direction(origin, target, state):
-    assert get_effective_cover_state(
-        active_target=None, confirmed=origin, confirmation_current=False,
-        observed_target=target, is_moving=True,
-    ) == state
-
-
 @pytest.mark.asyncio
-@pytest.mark.parametrize('endpoint,expected', [
-    (GatePosition.CLOSED, 'opening'), (GatePosition.OPEN, 'closing'),
+@pytest.mark.parametrize("endpoint,opposite", [
+    (GatePosition.CLOSED, GatePosition.OPEN),
+    (GatePosition.OPEN, GatePosition.CLOSED),
 ])
-async def test_runtime_publishes_camera_detected_manual_direction(endpoint, expected):
+async def test_manual_travel_updates_cover_only_at_completed_endpoint(endpoint, opposite):
     harness = Harness()
     runtime = build_runtime(harness, Clock())
     await harness.see(endpoint, 3)
-    harness.controller.observe(await harness.vision.snapshot())
-    await harness.see(GatePosition.PARTIALLY_OPEN, moving=True)
-    harness.controller.observe(await harness.vision.snapshot())
-    assert sync(runtime, harness)['cover_state'] == expected
+    assert sync(runtime, harness)["cover_state"] == endpoint.value.lower()
+    await harness.see(GatePosition.PARTIALLY_OPEN, 4, moving=True)
+    assert sync(runtime, harness)["cover_state"] == endpoint.value.lower()
+    await harness.see(GatePosition.PARTIALLY_OPEN, 20)
+    assert sync(runtime, harness)["cover_state"] == endpoint.value.lower()
+    await harness.see(GatePosition.UNKNOWN, 4)
+    assert sync(runtime, harness)["cover_state"] == endpoint.value.lower()
+    await harness.see(opposite, 3)
+    assert sync(runtime, harness)["cover_state"] == opposite.value.lower()
+
+
+@pytest.mark.asyncio
+async def test_web_command_does_not_report_opening_to_homekit():
+    harness = Harness()
+    runtime = build_runtime(harness, Clock())
+    await harness.see(GatePosition.CLOSED, 3)
+    assert sync(runtime, harness)["cover_state"] == "closed"
+    task = asyncio.create_task(harness.controller.request_state(GateTarget.OPEN, source="web_ui"))
+    while not harness.controller.active:
+        await asyncio.sleep(0)
+    assert sync(runtime, harness)["cover_state"] == "closed"
+    await harness.see(GatePosition.PARTIALLY_OPEN, 4, moving=True)
+    assert sync(runtime, harness)["cover_state"] == "closed"
+    await harness.abandon(task)

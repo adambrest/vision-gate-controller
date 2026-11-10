@@ -320,7 +320,7 @@ def test_nearly_open_gate_is_not_reported_open(name: str) -> None:
     """These confirmed OPEN, so a gate left short of open was never finished."""
     observation = observe_reference(real_classifier(), "partial", name)
     assert observation.position is GatePosition.PARTIALLY_OPEN
-    # Clears the controller's bar, so partial-stall recovery can act on it.
+    # Clears the controller's bar for an explicit user command.
     assert observation.confidence >= 0.70
 
 
@@ -361,3 +361,16 @@ def test_validate_reports_the_veto_acceptance_criterion() -> None:
     from tools.classify import validate
 
     assert validate(REFERENCES, S()) == 1  # 1 = HOLD, leave-one-out still failing
+
+
+@pytest.mark.parametrize("position,travel", [
+    (GatePosition.CLOSED, 0.09), (GatePosition.OPEN, 0.91),
+])
+def test_default_endpoint_tolerance_accepts_slightly_more_travel(position, travel):
+    classifier = real_classifier()
+    assert classifier.endpoint_travel_tolerance == Settings().endpoint_travel_tolerance == 0.10
+    result, confidence = classifier._corroborate(
+        position, 0.75, travel, leans_closed=position is GatePosition.CLOSED,
+    )
+    assert result is position
+    assert confidence >= 0.80

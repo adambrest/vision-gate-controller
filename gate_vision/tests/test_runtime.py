@@ -217,3 +217,24 @@ async def test_unchanged_state_is_not_republished() -> None:
     status["cover_state"] = "opening"
     await mqtt.publish()
     assert messages(client, STATE_TOPIC) == ["closed", "opening"]
+
+
+def test_stale_recovery_options_are_ignored(tmp_path) -> None:
+    options = tmp_path / "options.json"
+    options.write_text(json.dumps({
+        "partial_stall_seconds": 1,
+        "wrong_endpoint_seconds": 1,
+        "max_gate_attempts": 3,
+    }), encoding="utf-8")
+    settings = Settings.from_options(options)
+    assert not hasattr(settings, "max_gate_attempts")
+    assert not hasattr(settings, "partial_stall_seconds")
+    assert not hasattr(settings, "wrong_endpoint_seconds")
+    assert settings.endpoint_travel_tolerance == 0.10
+
+
+@pytest.mark.parametrize("stored,expected", [(0.08, 0.10), (0.12, 0.12)])
+def test_endpoint_tolerance_migrates_old_default_and_preserves_custom_values(tmp_path, stored, expected):
+    options = tmp_path / "options.json"
+    options.write_text(json.dumps({"endpoint_travel_tolerance": stored}), encoding="utf-8")
+    assert Settings.from_options(options).endpoint_travel_tolerance == expected

@@ -51,10 +51,15 @@ Startup never pulses the relay. A restart discards any prior in-progress command
 and re-establishes state from camera observations. Verified commands require a
 known state, and commands are rejected while the gate is moving.
 
-An operation allows at most three pulses. Retries require stable post-pulse
-camera evidence: a stationary partial position for five seconds or a confirmed
-wrong endpoint for five seconds, with at least three qualifying observations.
-Motion resets these timers; uncertain evidence never authorizes a retry.
+Each explicit operation sends at most one pulse and verifies the result until
+its travel timeout. No retry or camera-triggered recovery is performed, including
+when the gate stays partially open or at the wrong endpoint.
+
+Only commands received through the Home Assistant cover integration report
+opening or closing to HomeKit. Physical-button and Ingress travel retain the last
+completed endpoint until a new endpoint is confirmed. HomeKit and Home Assistant
+commands share the MQTT cover path and cannot be distinguished by this app.
+The default endpoint travel tolerance is 0.10.
 
 A single failed camera frame does not withdraw availability. The default camera
 offline threshold is fifteen seconds; missing references prevent monitoring

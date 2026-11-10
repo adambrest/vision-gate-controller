@@ -15,11 +15,8 @@ class Settings:
     confirmation_window: int = 4
     confirmation_required: int = 3
     gate_travel_timeout_seconds: float = 35.0
-    partial_stall_seconds: float = 5.0
-    wrong_endpoint_seconds: float = 5.0
-    max_gate_attempts: int = 3
     camera_unavailable_after_seconds: float = 15.0
-    endpoint_travel_tolerance: float = 0.08
+    endpoint_travel_tolerance: float = 0.10
     endpoint_travel_veto: bool = False
     endpoint_travel_corroboration: bool = True
     # OPEN needs the columns beside the parked leaf to match an open gate this
@@ -35,9 +32,9 @@ class Settings:
         # These rates are fixed. Discard stale values retained by older installs.
         values.pop("snapshot_interval_seconds", None)
         values.pop("moving_interval_seconds", None)
-        # Recovery now requires five seconds, including on existing installs.
-        values["partial_stall_seconds"] = 5.0
-        values["wrong_endpoint_seconds"] = 5.0
+        # Existing installs retain the old default in Supervisor options.
+        if values.get("endpoint_travel_tolerance") == 0.08:
+            values["endpoint_travel_tolerance"] = 0.10
         settings = cls(**{key: value for key, value in values.items() if key in cls.__annotations__})
         settings.validate()
         return settings
@@ -60,8 +57,6 @@ class Settings:
         self.polygon_points()
         if self.confirmation_required > self.confirmation_window:
             raise ValueError("confirmation_required cannot exceed confirmation_window")
-        if self.max_gate_attempts != 3:
-            raise ValueError("max_gate_attempts must be 3 (initial pulse plus two retries)")
         if self.moving_interval_seconds > self.snapshot_interval_seconds:
             raise ValueError("moving polling interval cannot exceed the normal interval")
         if not 0.0 < self.endpoint_travel_tolerance < 0.5:

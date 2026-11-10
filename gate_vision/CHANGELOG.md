@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.3
+
+- Remove all automatic gate recovery and command retries; each request sends at most one pulse.
+- Hold the last completed cover state for physical-button and Ingress travel.
+- Report opening/closing only for commands from the Home Assistant cover integration used by HomeKit.
+- Widen the default endpoint travel tolerance from 0.08 to 0.10.
+
 ## 1.2.2
 
 - Report camera-detected manual opening and closing to Home Assistant and HomeKit.

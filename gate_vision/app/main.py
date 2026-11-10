@@ -45,6 +45,7 @@ class Runtime:
         self.latest_observation = Observation(GatePosition.UNKNOWN, 0.0)
         self.confirmed_state = GatePosition.UNKNOWN
         self.confirmation_current = False
+        self._last_cover_endpoint = GatePosition.UNKNOWN
         self.availability = Availability(settings.camera_unavailable_after_seconds)
         self.latest_frame: np.ndarray | None = None
         self.latest_region: np.ndarray | None = None
@@ -88,11 +89,19 @@ class Runtime:
     def effective_cover_state(self) -> str:
         """The one place the Home Assistant cover state is decided."""
         controller = self.controller
+        if self.confirmation_current and not self.latest_observation.is_moving:
+            if self.confirmed_state in (GatePosition.OPEN, GatePosition.CLOSED):
+                self._last_cover_endpoint = self.confirmed_state
+        integration_target = (
+            controller.requested_target
+            if controller is not None and controller.operation.source == "home_assistant"
+            else None
+        )
         return get_effective_cover_state(
-            active_target=controller.requested_target if controller is not None else None,
+            active_target=integration_target,
             confirmed=self.confirmed_state,
             confirmation_current=self.confirmation_current,
-            observed_target=controller.observed_target if controller is not None else None,
+            last_endpoint=self._last_cover_endpoint,
             is_moving=self.latest_observation.is_moving,
         ).value
 
@@ -200,10 +209,6 @@ class Runtime:
                 self.confirmed_state = snapshot.confirmed
                 self.confirmation_current = snapshot.confirmation_current
                 self.recent_observations = snapshot.observations
-                if self.controller is not None:
-                    recovery_target = self.controller.observe(snapshot)
-                    if recovery_target is not None:
-                        self.start_request(recovery_target, source="camera_recovery")
                 frame_completed_at = loop.time()
                 last_sample_at = cycle_started
                 self._completed_frame_times.append(frame_completed_at)
@@ -216,8 +221,6 @@ class Runtime:
                 was_online = True
                 self._log_vision_change(observation, snapshot.confirmed)
             except Exception as exc:
-                if self.controller is not None:
-                    self.controller.monitoring_interrupted()
                 if was_online is not False:
                     LOGGER.warning("Camera offline: %s", exc)
                 was_online = False
@@ -289,9 +292,6 @@ async def run() -> None:
         home_assistant,
         vision,
         travel_timeout_seconds=settings.gate_travel_timeout_seconds,
-        partial_stall_seconds=settings.partial_stall_seconds,
-        wrong_endpoint_seconds=settings.wrong_endpoint_seconds,
-        max_attempts=settings.max_gate_attempts,
         on_change=runtime.publish_status,
     )
     runtime.attach(controller, mqtt)

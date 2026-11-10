@@ -56,9 +56,6 @@ def controller(relay: FakeRelay, vision: RollingVision, timeout: float = 0.2) ->
         relay,
         vision,
         travel_timeout_seconds=timeout,
-        partial_stall_seconds=5,
-        wrong_endpoint_seconds=5,
-        max_attempts=3,
     )
 
 
@@ -119,31 +116,17 @@ async def test_stale_confirmed_endpoint_with_unknown_latest_refuses_command() ->
 
 
 @pytest.mark.asyncio
-async def test_wrong_endpoint_for_five_seconds_allows_one_retry() -> None:
+@pytest.mark.parametrize("position", [GatePosition.CLOSED, GatePosition.PARTIALLY_OPEN])
+async def test_stalled_or_wrong_endpoint_never_retries(position) -> None:
     vision, relay = RollingVision(), FakeRelay()
     await add(vision, GatePosition.CLOSED, 3)
-    gate = controller(relay, vision)
+    gate = controller(relay, vision, timeout=0.03)
     task = asyncio.create_task(gate.request_state(GateTarget.OPEN))
     await wait_for_pulses(relay, 1)
-    await add(vision, GatePosition.CLOSED, 3, start=relay.pulses[0].sent_at + timedelta(milliseconds=1), step=3)
-    await wait_for_pulses(relay, 2)
-    await add(vision, GatePosition.OPEN, 3, start=relay.pulses[1].sent_at + timedelta(milliseconds=1))
-    assert await task == OperationResult.SUCCESS
-    assert len(relay.pulses) == 2
-
-
-@pytest.mark.asyncio
-async def test_stationary_partial_for_five_seconds_allows_retry() -> None:
-    vision, relay = RollingVision(), FakeRelay()
-    await add(vision, GatePosition.CLOSED, 3)
-    gate = controller(relay, vision)
-    task = asyncio.create_task(gate.request_state(GateTarget.OPEN))
-    await wait_for_pulses(relay, 1)
-    await add(vision, GatePosition.PARTIALLY_OPEN, 3, start=relay.pulses[0].sent_at + timedelta(milliseconds=1), step=5.5)
-    await wait_for_pulses(relay, 2)
-    await add(vision, GatePosition.OPEN, 3, start=relay.pulses[1].sent_at + timedelta(milliseconds=1))
-    assert await task == OperationResult.SUCCESS
-    assert len(relay.pulses) == 2
+    await add(vision, position, 10, start=relay.pulses[0].sent_at, step=10)
+    assert await task == OperationResult.ABORTED_UNCERTAIN
+    assert len(relay.pulses) == 1
+    assert not gate.active
 
 
 @pytest.mark.asyncio
@@ -168,55 +151,6 @@ async def test_unknown_after_pulse_never_retries() -> None:
     await add(vision, GatePosition.UNKNOWN, 3, start=relay.pulses[0].sent_at)
     assert await task == OperationResult.ABORTED_UNCERTAIN
     assert len(relay.pulses) == 1
-
-
-@pytest.mark.asyncio
-async def test_partial_stall_then_wrong_endpoint_uses_final_recovery_pulse() -> None:
-    vision, relay = RollingVision(), FakeRelay()
-    await add(vision, GatePosition.CLOSED, 3)
-    gate = controller(relay, vision)
-    task = asyncio.create_task(gate.request_state(GateTarget.OPEN))
-
-    await wait_for_pulses(relay, 1)
-    await add(
-        vision,
-        GatePosition.PARTIALLY_OPEN,
-        3,
-        start=relay.pulses[0].sent_at + timedelta(milliseconds=1),
-        step=5.5,
-    )
-    await wait_for_pulses(relay, 2)
-    await add(
-        vision,
-        GatePosition.CLOSED,
-        3,
-        start=relay.pulses[1].sent_at + timedelta(milliseconds=1),
-        step=3,
-    )
-    await wait_for_pulses(relay, 3)
-    await add(
-        vision,
-        GatePosition.OPEN,
-        3,
-        start=relay.pulses[2].sent_at + timedelta(milliseconds=1),
-    )
-
-    assert await task == OperationResult.SUCCESS
-    assert len(relay.pulses) == 3
-
-
-@pytest.mark.asyncio
-async def test_exactly_three_failed_attempts() -> None:
-    vision, relay = RollingVision(), FakeRelay()
-    await add(vision, GatePosition.CLOSED, 3)
-    gate = controller(relay, vision)
-    task = asyncio.create_task(gate.request_state(GateTarget.OPEN))
-    for count in (1, 2, 3):
-        await wait_for_pulses(relay, count)
-        pulse = relay.pulses[count - 1]
-        await add(vision, GatePosition.CLOSED, 3, start=pulse.sent_at + timedelta(milliseconds=1), step=3)
-    assert await task == OperationResult.FAILED_AFTER_3_ATTEMPTS
-    assert len(relay.pulses) == 3
 
 
 @pytest.mark.asyncio
@@ -273,46 +207,3 @@ async def test_manual_pulse_is_rejected_while_another_operation_runs() -> None:
         await gate.manual_pulse()
     first.cancel()
     await asyncio.gather(first, return_exceptions=True)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('endpoint,target', [
-    (GatePosition.CLOSED, GateTarget.OPEN),
-    (GatePosition.OPEN, GateTarget.CLOSED),
-])
-async def test_manual_departure_recovers_once_after_five_seconds(endpoint, target):
-    vision, relay = RollingVision(), FakeRelay()
-    gate = GateController(relay, vision)
-    await add(vision, endpoint, 3)
-    gate.observe(await vision.snapshot())
-    base = datetime.now(UTC)
-    for second in range(7):
-        snapshot = await vision.add(Observation(
-            GatePosition.PARTIALLY_OPEN, 0.96,
-            timestamp=base + timedelta(seconds=second),
-        ))
-        recovery = gate.observe(snapshot)
-        assert recovery == (target if second == 5 else None)
-    assert gate.observed_target == target
-
-
-@pytest.mark.asyncio
-async def test_manual_recovery_requires_known_origin_and_continuous_stationary_evidence():
-    vision, relay = RollingVision(), FakeRelay()
-    gate = GateController(relay, vision)
-    base = datetime.now(UTC)
-    for second in range(8):
-        snapshot = await vision.add(Observation(
-            GatePosition.PARTIALLY_OPEN, 0.96,
-            timestamp=base + timedelta(seconds=second),
-        ))
-        assert gate.observe(snapshot) is None
-    await add(vision, GatePosition.CLOSED, 3)
-    gate.observe(await vision.snapshot())
-    for second in range(10):
-        snapshot = await vision.add(Observation(
-            GatePosition.PARTIALLY_OPEN, 0.96,
-            is_moving=second == 4,
-            timestamp=base + timedelta(seconds=10 + second),
-        ))
-        assert gate.observe(snapshot) is None

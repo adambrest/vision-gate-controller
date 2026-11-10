@@ -9,7 +9,7 @@ Vision Gate Controller is my personal Home Assistant app, tailored to my gate an
 - The Home Assistant Ingress control dashboard is always available.
 - Frames are processed in memory and are never accumulated on disk.
 
-Position and motion are independent. For example, the gate can be `PARTIALLY_OPEN` and `MOVING` simultaneously. No command or retry is sent while motion is detected.
+Position and motion are independent. For example, the gate can be `PARTIALLY_OPEN` and `MOVING` simultaneously. No command is sent while motion is detected.
 
 ## Ownership
 
@@ -25,33 +25,26 @@ icon-selection logic, so icons are changed entirely in Home Assistant.
 
 | State | Meaning |
 | --- | --- |
-| `open` | Rolling camera confirmation currently says OPEN. |
-| `closed` | Rolling camera confirmation currently says CLOSED. |
-| `opening` | An OPEN command is active, or manual opening is inferred from camera motion. |
-| `closing` | A CLOSE command is active, or manual closing is inferred from camera motion. |
-| `unknown` | No operation is active and vision is not confidently OPEN or CLOSED. |
+| `open` | Last completed endpoint confirmed by the camera is OPEN. |
+| `closed` | Last completed endpoint confirmed by the camera is CLOSED. |
+| `opening` | An OPEN command received through the Home Assistant cover is active. |
+| `closing` | A CLOSE command received through the Home Assistant cover is active. |
+| `unknown` | No completed endpoint has been confirmed since startup. |
 | `unavailable` | Home Assistant's own state when availability is withdrawn. |
 
-`get_effective_cover_state()` in `app/cover_state.py` is the single source of
-truth and applies exactly these rules, in order:
-
-1. An active operation targeting OPEN reports `opening`.
-2. An active operation targeting CLOSED reports `closing`.
-3. Camera motion from the last confirmed endpoint reports `opening` or `closing`.
-4. A current rolling confirmation of OPEN reports `open`.
-5. A current rolling confirmation of CLOSED reports `closed`.
-6. Anything else reports `unknown`.
-
-`opening` and `closing` are published the moment GateController accepts the
-command, without waiting for the next camera frame. A confirmation the rolling
-window no longer supports is treated as stale, so a previously confirmed
-position is never reported indefinitely.
+`get_effective_cover_state()` in `app/cover_state.py` resolves the cover state.
+Only active Home Assistant cover commands report `opening` or `closing`, immediately
+on acceptance. HomeKit commands arrive through this same cover integration;
+the MQTT command does not identify whether HomeKit or Home Assistant originated it.
+Physical buttons and Ingress controls keep the last completed endpoint visible
+until rolling camera confirmation establishes the next endpoint. Motion, partial
+positions, and uncertain frames remain available in diagnostics.
 
 Custom states such as `partial`, `moving`, `fault`, `stopped`, or `error` are
 never emitted. They exist internally and are exposed as attributes only:
 `vision_state`, `raw_state`, `confirmed_state`, `controller_state`,
 `target_state`, `confidence`, `fault`, `fault_reason`, and `last_result`. A
-gate stopped mid-travel therefore reports cover state `unknown` with
+gate stopped mid-travel therefore holds its last completed cover state with
 `vision_state: PARTIAL`, `fault: true`, and
 `fault_reason: gate_stopped_mid_travel`.
 
@@ -66,8 +59,8 @@ a missing reference set, withdraws availability immediately. Availability
 returns as soon as camera frames resume.
 
 Home Assistant is pushed a fresh entity update whenever opening or closing
-begins, OPEN or CLOSED is confirmed, an operation fails or aborts, the state
-becomes unknown, availability changes, or a diagnostic fault changes. No manual
+begins from an integration command, OPEN or CLOSED is confirmed, an operation
+fails or aborts, availability changes, or a diagnostic fault changes. No manual
 refresh or unrelated polling delay is involved.
 
 ## Supported actions
@@ -85,8 +78,8 @@ between its position and `unknown`, which reads as the entity misbehaving.
 Motion is the one exception and drops the confirmation immediately, since a
 moving gate really is changing position.
 
-The entity reports `unknown` rather than guessing. That is deliberate: a wrong
-confident state is worse than an honest absent one.
+The cover retains the last completed endpoint while internal vision diagnostics
+continue to report uncertain or partial observations. It starts as `unknown`.
 
 ## Working the gate by hand
 
@@ -96,16 +89,15 @@ that works regardless of gate state. It is a bare toggle: it claims no target,
 verifies no result, and is not treated as a fault. It still refuses to fire
 while the gate is moving, and while another operation is running.
 
-## Bounded recovery
+## Command verification
 
-An operation has at most three pulses total: the initial pulse and no more than two retries.
+Each explicit request sends at most one relay pulse. The controller waits up to
+`gate_travel_timeout_seconds` for the target, then ends verification without
+sending another pulse. A gate that stops mid-travel or remains at the wrong
+endpoint is left alone. Camera observations never initiate gate commands.
 
-- A continuously stationary, confident `PARTIALLY_OPEN` gate permits a retry after 5 seconds.
-- A confidently confirmed wrong endpoint permits a retry after five seconds.
-- Either retry condition requires at least three qualifying post-pulse frames.
-- Motion resets both timers.
-- Unknown or inconsistent camera evidence never authorizes a retry.
-- A third unsuccessful attempt ends as `FAILED_AFTER_3_ATTEMPTS`; attempt four cannot occur.
+The default endpoint travel tolerance is 0.10 (previously 0.08). Existing options
+using 0.08 migrate to 0.10; other custom values are preserved.
 
 ## Gate travel
 
@@ -206,9 +198,5 @@ checks the lightweight status endpoint at 4 Hz so it can display movement prompt
 
 See [Runtime behaviour](DOCS.md) for more detail on this installation.
 
-Camera-detected manual travel reports opening after departure from closed and
-closing after departure from open. A confident stationary partial gate for five
-continuous seconds starts recovery towards the opposite of the last confirmed
-endpoint. This runs once per departure, with at most three relay attempts.
-Movement, uncertain frames, and camera interruptions reset the stall timer.
-Without a known previous endpoint, no automatic recovery is attempted.
+Camera-detected manual travel updates the cover only after a completed OPEN or
+CLOSED endpoint is confirmed. A stationary partial gate never triggers recovery.

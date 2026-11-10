@@ -256,7 +256,7 @@ class ReferenceClassifier:
         reference_root: Path,
         expected_count: int | None = None,
         *,
-        endpoint_travel_tolerance: float = 0.08,
+        endpoint_travel_tolerance: float = 0.10,
         endpoint_travel_veto: bool = False,
         endpoint_travel_corroboration: bool = True,
         open_clearance_minimum: float = 0.50,
@@ -419,8 +419,7 @@ class ReferenceClassifier:
         minimum = self.open_clearance_minimum
         if clearance >= minimum:
             return position, confidence
-        # At or above the controller's 0.70 bar, so the partial-stall recovery
-        # can finish the move.
+        # Report a confident partial position when open clearance is insufficient.
         shortfall = (minimum - clearance) / max(minimum, 1e-6)
         return GatePosition.PARTIALLY_OPEN, float(np.clip(0.70 + shortfall * 0.30, 0.70, 1.0))
 
